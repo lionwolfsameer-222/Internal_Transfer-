@@ -309,7 +309,7 @@
         const firebaseConfig = {
             apiKey: "AIzaSyC-Erc6hv90KP5lkef9nGQxXKM7lkltBHI",
             authDomain: "lion-wolf.firebaseapp.com",
-            databaseURL: "https://lion-wolf-default-rtdb.firebaseio.com",
+            databaseURL: "https://lion-wolf-default-rtdb.asia-southeast1.firebasedatabase.app",
             projectId: "lion-wolf",
             storageBucket: "lion-wolf.firebasestorage.app",
             messagingSenderId: "951962934786",
@@ -346,8 +346,8 @@
         const cloneData = (value) => JSON.parse(JSON.stringify(value));
         const cleanText = (value) => String(value ?? '').replace(/[<>]/g, '').trim();
 
-        let data = loadData();
-        let session = loadSession();
+        let data = null;
+        let session = null;
         let activeManagerTab = 'send';
         let toastTimer = null;
 
@@ -368,7 +368,9 @@
                 console.warn('Firebase init error:', e);
             }
 
-            bindEvents();
+            // ✅ Data load karo Firebase init ke baad
+            data = loadData();
+            session = loadSession();
             normalizeAndCleanupData(false);
             if (session.role === 'manager') {
                 showScreen('screenManager');
