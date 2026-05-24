@@ -305,15 +305,16 @@
     <script>
         const STORAGE_KEY = 'healthyChefTransferAppV2';
 
-        // ✅ Firebase Configuration - Project 2
+        // ✅ Firebase Configuration - Internal Transfer (lion-wolf)
         const firebaseConfig = {
-            apiKey: "AIzaSyC7aCV55XkkT0esv2okiOfKP1TTV0HTl_M",
-            authDomain: "transfer-acbc2.firebaseapp.com",
-            databaseURL: "https://transfer-acbc2-default-rtdb.firebaseio.com",
-            projectId: "transfer-acbc2",
-            storageBucket: "transfer-acbc2.firebasestorage.app",
-            messagingSenderId: "92001619105",
-            appId: "1:92001619105:web:6066311cac6b04098774e0"
+            apiKey: "AIzaSyC-Erc6hv90KP5lkef9nGQxXKM7lkltBHI",
+            authDomain: "lion-wolf.firebaseapp.com",
+            databaseURL: "https://lion-wolf-default-rtdb.firebaseio.com",
+            projectId: "lion-wolf",
+            storageBucket: "lion-wolf.firebasestorage.app",
+            messagingSenderId: "951962934786",
+            appId: "1:951962934786:web:a4c098311d6cc9d892511b",
+            measurementId: "G-3CVNQZZZP1"
         };
 
         firebase.initializeApp(firebaseConfig);
@@ -476,6 +477,7 @@
         }
 
         // ✅ Firebase Real-Time Listener
+        // Jab bhi koi bhi device data change kare, sab ko turant milega
         function startFirebaseListener() {
             DATA_REF.on('value', (snapshot) => {
                 const firebaseData = snapshot.val();
