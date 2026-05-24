@@ -309,7 +309,7 @@
         const firebaseConfig = {
             apiKey: "AIzaSyC-Erc6hv90KP5lkef9nGQxXKM7lkltBHI",
             authDomain: "lion-wolf.firebaseapp.com",
-            databaseURL: "https://lion-wolf-default-rtdb.asia-southeast1.firebasedatabase.app",
+            databaseURL: "https://lion-wolf-default-rtdb.firebaseio.com",
             projectId: "lion-wolf",
             storageBucket: "lion-wolf.firebasestorage.app",
             messagingSenderId: "951962934786",
@@ -317,9 +317,8 @@
             measurementId: "G-3CVNQZZZP1"
         };
 
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.database();
-        const DATA_REF = db.ref('healthyChefApp');
+        let db = null;
+        let DATA_REF = null;
         let firebaseReady = false;
         const STATUS_LABELS = {
             sent: 'PENDING',
@@ -360,6 +359,15 @@
         };
 
         document.addEventListener('DOMContentLoaded', () => {
+            // ✅ Firebase init - SDK load hone ke baad
+            try {
+                firebase.initializeApp(firebaseConfig);
+                db = firebase.database();
+                DATA_REF = db.ref('healthyChefApp');
+            } catch(e) {
+                console.warn('Firebase init error:', e);
+            }
+
             bindEvents();
             normalizeAndCleanupData(false);
             if (session.role === 'manager') {
@@ -477,8 +485,12 @@
         }
 
         // ✅ Firebase Real-Time Listener
-        // Jab bhi koi bhi device data change kare, sab ko turant milega
         function startFirebaseListener() {
+            if (!DATA_REF) {
+                console.warn('Firebase not initialized, using local data');
+                el('loadingOverlay').classList.add('hidden');
+                return;
+            }
             DATA_REF.on('value', (snapshot) => {
                 const firebaseData = snapshot.val();
                 if (!firebaseData) {
