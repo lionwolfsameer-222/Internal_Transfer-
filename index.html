@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Healthy Chef - Material Transfer</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- ✅ Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+    <style>
+        :root {
+            --primary: #1e3a8a;
+            --primary-light: #3b82f6;
+            --primary-dark: #172554;
+            --success: #15803d;
+            --warning: #b45309;
+            --danger: #b91c1c;
+        }
+        * { -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; }
+        .hidden { display: none !important; }
+        .logo-image { width: 100%; height: 100%; object-fit: contain; object-position: center; background: #fff; padding: 4px; display: none; }
+        .login-logo-image { padding: 7px; }
+        .logo-placeholder.is-hidden { display: none !important; }
+        .screen { display: none; }
+        .screen.active { display: flex; animation: fadeIn 0.22s ease-out; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: flex; animation: fadeIn 0.18s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes slideUp { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+        .spinner { width: 38px; height: 38px; border: 4px solid rgba(255,255,255,0.24); border-top-color: #fff; border-radius: 999px; animation: spin 0.7s linear infinite; }
+        .status-sent { background: #dbeafe; color: #1e40af; }
+        .status-acknowledged { background: #e0e7ff; color: #3730a3; }
+        .status-return_required { background: #fee2e2; color: #991b1b; }
+        .status-returned { background: #fef3c7; color: #92400e; }
+        .status-closed { background: #f1f5f9; color: #475569; }
+        .toast { animation: slideUp 0.2s ease-out; }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-100 text-slate-900 flex justify-center">
+    <div id="loadingOverlay" class="fixed inset-0 z-50 bg-slate-950/70 flex flex-col items-center justify-center gap-4">
+        <div class="spinner"></div>
+        <p class="text-white text-sm font-semibold">Loading App Data...</p>
+    </div>
+
+    <main class="w-full max-w-[480px] min-h-screen bg-white shadow-lg flex flex-col">
+        <header class="relative flex items-center gap-3 bg-gradient-to-br from-blue-950 to-blue-800 text-white px-4 py-4">
+            <div id="headerLogoBox" class="relative h-14 w-14 shrink-0 rounded-xl bg-white/15 border-2 border-white/30 overflow-hidden flex items-center justify-center">
+                <img id="headerLogoImg" class="logo-image" alt="Healthy Chef logo">
+                <i id="headerLogoPlaceholder" class="logo-placeholder fa-solid fa-store text-2xl opacity-80"></i>
+                <span class="absolute inset-0 hidden items-center justify-center bg-black/45 text-[10px] font-bold" id="headerLogoHint">Upload</span>
+                <input id="logoInputHeader" class="absolute inset-0 opacity-0 cursor-pointer" type="file" accept="image/*">
+            </div>
+            <div class="min-w-0 flex-1 pr-24">
+                <h1 id="appHeaderTitle" class="text-lg font-bold leading-tight">Healthy Chef</h1>
+                <p id="appHeaderSubtitle" class="mt-1 truncate text-sm text-white/75">Inter-Restaurant Material Transfer</p>
+            </div>
+            <button id="logoutBtn" class="hidden absolute right-3 top-4 rounded-full border border-white/25 bg-white/15 px-3 py-2 text-xs font-bold" type="button">
+                <i class="fa-solid fa-right-from-bracket"></i> Logout
+            </button>
+        </header>
+
+        <section id="screenAuth" class="screen active flex-col gap-5 p-5 flex-1">
+            <div class="mt-2 flex flex-col items-center gap-3">
+                <div id="loginLogoTapArea" class="h-24 w-24 rounded-2xl border-2 border-dashed border-blue-400 bg-blue-50 flex items-center justify-center overflow-hidden cursor-pointer select-none">
+                    <img id="loginLogoImg" class="logo-image login-logo-image" alt="Healthy Chef logo">
+                    <i id="loginLogoPlaceholder" class="logo-placeholder fa-solid fa-building-shield text-4xl text-blue-500"></i>
+                </div>
+                <div class="text-center">
+                    <h2 class="text-lg font-bold text-blue-950">Branch Login</h2>
+                    <p class="text-xs text-slate-500">Select restaurant and continue securely.</p>
+                </div>
+            </div>
+
+            <div id="masterLoginRow" class="hidden flex-col gap-2">
+                <label class="text-xs font-bold uppercase tracking-wide text-slate-600"><i class="fa-solid fa-user-gear"></i> System Profile Role</label>
+                <select id="inputAuthRole" class="rounded-xl border border-slate-300 bg-slate-50 px-3 py-3 text-base outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+                    <option value="manager">Restaurant Manager Account</option>
+                    <option value="master">Master Administrator Terminal</option>
+                </select>
+            </div>
+
+            <div id="containerBranchSelection" class="flex flex-col gap-2">
+                <label class="text-xs font-bold uppercase tracking-wide text-slate-600"><i class="fa-solid fa-store"></i> Select Restaurant</label>
+                <select id="inputAuthBranch" class="rounded-xl border border-slate-300 bg-slate-50 px-3 py-3 text-base outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"></select>
+            </div>
+
+            <div class="flex flex-col gap-2">
+                <label class="text-xs font-bold uppercase tracking-wide text-slate-600"><i class="fa-solid fa-lock"></i> Password</label>
+                <div class="relative">
+                    <input id="inputAuthPassword" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-3 pr-12 text-base outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" type="password" placeholder="Password">
+                    <button id="togglePasswordBtn" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500" type="button"><i class="fa-solid fa-eye"></i></button>
+                </div>
+            </div>
+
+            <button id="loginBtn" class="mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-900 py-4 text-base font-bold text-white active:opacity-80" type="button">
+                Secure Authenticate <i class="fa-solid fa-right-to-bracket"></i>
+            </button>
+
+        </section>
+
+        <section id="screenManager" class="screen flex-col flex-1">
+            <nav class="m-4 grid grid-cols-4 gap-1 rounded-2xl bg-slate-100 p-1">
+                <button class="manager-tab rounded-xl px-2 py-3 text-sm font-bold text-slate-600" data-tab="send" type="button">Send</button>
+                <button class="manager-tab rounded-xl px-2 py-3 text-sm font-bold text-slate-600" data-tab="dashboard" type="button">Dashboard</button>
+                <button class="manager-tab rounded-xl px-2 py-3 text-sm font-bold text-slate-600" data-tab="reports" type="button">Reports</button>
+                <button class="manager-tab rounded-xl px-2 py-3 text-sm font-bold text-slate-600" data-tab="settings" type="button">Settings</button>
+            </nav>
+
+            <div id="managerBanner" class="mx-4 hidden rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900"></div>
+
+            <div id="tabSend" class="tab-panel flex-col gap-4 p-4 pt-1 flex-1">
+                <div>
+                    <h2 class="border-l-4 border-blue-500 pl-3 text-xl font-bold text-blue-950">Send Item</h2>
+                    <p class="mt-1 text-sm text-slate-500">Create one clean transfer entry. It will not duplicate on dashboard.</p>
+                </div>
+
+                <form id="sendForm" class="flex flex-col gap-4">
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                        <div class="text-xs font-bold uppercase text-slate-500">From</div>
+                        <div id="sendFromBranch" class="mt-1 font-bold text-slate-900">-</div>
+                    </div>
+                    <div class="flex flex-col gap-2">
+                        <label class="text-xs font-bold uppercase text-slate-600">Send To</label>
+                        <select id="sendToBranch" class="rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"></select>
+                    </div>
+                    <div class="flex flex-col gap-2">
+                        <label class="text-xs font-bold uppercase text-slate-600">Item Name</label>
+                        <input id="sendItemName" class="rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" type="text" placeholder="Example: Avocado Pulp" required>
+                    </div>
+                    <div class="grid grid-cols-[1fr_110px] gap-3">
+                        <div class="flex flex-col gap-2">
+                            <label class="text-xs font-bold uppercase text-slate-600">Quantity</label>
+                            <input id="sendQty" class="rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" type="number" min="1" step="1" value="1" required>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <label class="text-xs font-bold uppercase text-slate-600">Unit</label>
+                            <select id="sendUnit" class="rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+                                <option>pcs</option>
+                                <option>kg</option>
+                                <option>ltr</option>
+                                <option>box</option>
+                                <option>pkt</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="extraItemsContainer" class="flex flex-col gap-3"></div>
+                    <button id="addItemRowBtn" class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-900" type="button">
+                        <i class="fa-solid fa-plus"></i> Add Item
+                    </button>
+                    <label class="flex items-center justify-between rounded-xl border border-blue-100 bg-blue-50 p-3">
+                        <span>
+                            <span class="block text-sm font-bold text-blue-950">Full Return Flow Enabled</span>
+                            <span class="block text-xs text-blue-800">Every transfer follows Pending -> Acknowledged -> Mark Return -> Received Done -> Closed.</span>
+                        </span>
+                        <input id="sendReturnRequired" class="h-5 w-5 accent-blue-800" type="checkbox" checked disabled>
+                    </label>
+                    <div id="returnDaysWrap" class="flex flex-col gap-2">
+                        <label class="text-xs font-bold uppercase text-slate-600">Return After Days Alert</label>
+                        <input id="sendReturnDays" class="rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" type="number" min="1" step="1" value="2">
+                    </div>
+                    <div class="flex flex-col gap-2">
+                        <label class="text-xs font-bold uppercase text-slate-600">Note</label>
+                        <input id="sendNote" class="rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" type="text" placeholder="Optional note">
+                    </div>
+                    <button class="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-900 py-4 font-bold text-white active:opacity-80" type="submit">
+                        Send Transfer <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </form>
+            </div>
+
+            <div id="tabDashboard" class="tab-panel flex-col gap-4 p-4 pt-1 flex-1">
+                <div id="dashboardAlerts" class="flex flex-col gap-2"></div>
+                <div>
+                    <h2 class="border-l-4 border-blue-500 pl-3 text-xl font-bold text-blue-950"><i class="fa-solid fa-list-check"></i> Action Queue</h2>
+                    <p class="mt-1 text-sm text-slate-500">Closed transfers are hidden automatically after Received Done.</p>
+                </div>
+                <div id="actionQueue" class="flex flex-col gap-3"></div>
+            </div>
+
+            <div id="tabReports" class="tab-panel flex-col gap-4 p-4 pt-1 flex-1">
+                <div>
+                    <h2 class="border-l-4 border-blue-500 pl-3 text-xl font-bold text-blue-950">Reports</h2>
+                    <p class="mt-1 text-sm text-slate-500">All branch transfer history including closed items.</p>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <select id="reportStatusFilter" class="rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm">
+                        <option value="closed">Closed</option>
+                    </select>
+                    <button id="downloadReportBtn" class="rounded-xl bg-green-600 px-3 py-3 text-sm font-bold text-white" type="button"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 flex flex-col gap-3">
+                    <label class="text-xs font-bold uppercase text-slate-600"><i class="fa-solid fa-filter"></i> Export Filter</label>
+                    <select id="reportExportFilterType" class="rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm">
+                        <option value="all">All Time</option>
+                        <option value="dateRange">Date to Date</option>
+                        <option value="month">Month Wise</option>
+                    </select>
+                    <div id="reportExportDateRange" class="hidden grid grid-cols-2 gap-2">
+                        <input id="reportExportFromDate" class="rounded-xl border border-slate-300 px-3 py-3 text-sm" type="date" aria-label="From date">
+                        <input id="reportExportToDate" class="rounded-xl border border-slate-300 px-3 py-3 text-sm" type="date" aria-label="To date">
+                    </div>
+                    <div id="reportExportMonthWrap" class="hidden">
+                        <input id="reportExportMonth" class="w-full rounded-xl border border-slate-300 px-3 py-3 text-sm" type="month" aria-label="Export month">
+                    </div>
+                    <button id="downloadReportFilteredBtn" class="rounded-xl bg-green-700 px-3 py-3 text-sm font-bold text-white" type="button"><i class="fa-solid fa-file-excel"></i> Download Filtered Excel</button>
+                </div>
+                <div id="reportsList" class="flex flex-col gap-3"></div>
+            </div>
+
+            <div id="tabSettings" class="tab-panel flex-col gap-4 p-4 pt-1 flex-1">
+                <div>
+                    <h2 class="border-l-4 border-blue-500 pl-3 text-xl font-bold text-blue-950">Settings</h2>
+                    <p class="mt-1 text-sm text-slate-500">Logged-in branch and data tools.</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="text-xs font-bold uppercase text-slate-500">Current Login</div>
+                    <div id="settingsLoginName" class="mt-1 text-lg font-bold text-slate-900">-</div>
+                    <div class="mt-1 text-sm text-slate-500">Header now shows the exact branch welcome.</div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col gap-3">
+                    <h3 class="font-bold text-slate-900"><i class="fa-solid fa-key"></i> Change Branch Password</h3>
+                    <input id="branchCurrentPassword" class="rounded-xl border border-slate-300 px-3 py-3" type="password" placeholder="Current branch password">
+                    <input id="branchNewPassword" class="rounded-xl border border-slate-300 px-3 py-3" type="password" placeholder="New branch password">
+                    <input id="branchConfirmPassword" class="rounded-xl border border-slate-300 px-3 py-3" type="password" placeholder="Confirm new password">
+                    <button id="saveBranchPasswordBtn" class="rounded-xl bg-blue-900 px-4 py-3 font-bold text-white" type="button">Save Branch Password</button>
+                </div>
+                <button id="cleanupBtn" class="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-left font-bold text-amber-800" type="button">
+                    <i class="fa-solid fa-broom"></i> Check and Fix Closed Queue Glitches
+                </button>
+                <button id="managerLogoutBtn" class="rounded-xl bg-slate-900 px-4 py-3 font-bold text-white" type="button">
+                    <i class="fa-solid fa-right-from-bracket"></i> Logout
+                </button>
+            </div>
+        </section>
+
+        <section id="screenMaster" class="screen flex-col gap-4 p-4 flex-1">
+            <div>
+                <h2 class="border-l-4 border-blue-500 pl-3 text-xl font-bold text-blue-950">Master Terminal</h2>
+                <p class="mt-1 text-sm text-slate-500">Manage branches, app name, and transfer cleanup.</p>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col gap-3">
+                <h3 class="font-bold text-slate-900"><i class="fa-solid fa-pen-to-square"></i> App Name</h3>
+                <input id="masterAppName" class="rounded-xl border border-slate-300 px-3 py-3" type="text" placeholder="App name">
+                <input id="masterSubtitle" class="rounded-xl border border-slate-300 px-3 py-3" type="text" placeholder="Subtitle">
+                <button id="saveAppSettingsBtn" class="rounded-xl bg-blue-900 px-4 py-3 font-bold text-white" type="button">Save App Name</button>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col gap-3">
+                <h3 class="font-bold text-slate-900"><i class="fa-solid fa-key"></i> Master Password</h3>
+                <input id="masterCurrentPassword" class="rounded-xl border border-slate-300 px-3 py-3" type="password" placeholder="Current master password">
+                <input id="masterNewPassword" class="rounded-xl border border-slate-300 px-3 py-3" type="password" placeholder="New master password">
+                <input id="masterConfirmPassword" class="rounded-xl border border-slate-300 px-3 py-3" type="password" placeholder="Confirm new password">
+                <button id="saveMasterPasswordBtn" class="rounded-xl bg-slate-900 px-4 py-3 font-bold text-white" type="button">Change Master Password</button>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col gap-3">
+                <h3 class="font-bold text-slate-900"><i class="fa-solid fa-store"></i> Branch Controls</h3>
+                <div class="flex gap-2">
+                    <input id="newBranchName" class="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-3" type="text" placeholder="New branch name">
+                    <button id="addBranchBtn" class="rounded-xl bg-green-700 px-4 font-bold text-white" type="button">Add</button>
+                </div>
+                <div id="masterBranchList" class="flex flex-col gap-2"></div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col gap-3">
+                <h3 class="font-bold text-slate-900"><i class="fa-solid fa-database"></i> Transfer Data</h3>
+                <select id="masterExportBranch" class="rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm">
+                    <option value="ALL">All Branches</option>
+                </select>
+                <select id="masterExportFilterType" class="rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm">
+                    <option value="all">All Time</option>
+                    <option value="dateRange">Date to Date</option>
+                    <option value="month">Month Wise</option>
+                </select>
+                <div id="masterExportDateRange" class="hidden grid grid-cols-2 gap-2">
+                    <input id="masterExportFromDate" class="rounded-xl border border-slate-300 px-3 py-3 text-sm" type="date" aria-label="From date">
+                    <input id="masterExportToDate" class="rounded-xl border border-slate-300 px-3 py-3 text-sm" type="date" aria-label="To date">
+                </div>
+                <div id="masterExportMonthWrap" class="hidden">
+                    <input id="masterExportMonth" class="w-full rounded-xl border border-slate-300 px-3 py-3 text-sm" type="month" aria-label="Export month">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="masterExcelBtn" class="rounded-xl bg-green-600 px-3 py-3 text-sm font-bold text-white" type="button">Download Excel</button>
+                    <button id="masterCleanupBtn" class="rounded-xl bg-amber-500 px-3 py-3 text-sm font-bold text-white" type="button">Run Cleanup</button>
+                </div>
+                <button id="deleteClosedBtn" class="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm font-bold text-red-700" type="button">Delete Closed Transfers</button>
+                <button id="deleteAllTransfersBtn" class="rounded-xl border border-red-300 bg-red-100 px-3 py-3 text-sm font-bold text-red-800" type="button">Delete All Transfer Data</button>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col gap-3">
+                <h3 class="font-bold text-slate-900"><i class="fa-solid fa-clock-rotate-left"></i> Live Transfer Monitor</h3>
+                <div id="masterTransferList" class="flex max-h-[360px] flex-col gap-3 overflow-y-auto"></div>
+            </div>
+        </section>
+    </main>
+
+    <div id="toast" class="toast fixed bottom-5 left-1/2 z-50 hidden w-[calc(100%-32px)] max-w-[440px] -translate-x-1/2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-lg"></div>
+
+    <script>
+        const STORAGE_KEY = 'healthyChefTransferAppV2';
+
+        // ✅ Firebase Configuration - Internal Transfer Project
+        const firebaseConfig = {
+            apiKey: "AIzaSyAzoZs276v_ROIkmbfzYZZCXpWZlFIACmI",
+            authDomain: "transfer-cd57c.firebaseapp.com",
+            databaseURL: "https://transfer-cd57c-default-rtdb.firebaseio.com",
+            projectId: "transfer-cd57c",
+            storageBucket: "transfer-cd57c.firebasestorage.app",
+            messagingSenderId: "452889379454",
+            appId: "1:452889379454:web:be6a3641a2dfe8fa6e4e2f",
+            measurementId: "G-8ZFHXR2TV6"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const DATA_REF = db.ref('healthyChefApp');
+        let firebaseReady = false;
+        const STATUS_LABELS = {
+            sent: 'PENDING',
+            acknowledged: 'ACKNOWLEDGED',
+            returned: 'MARK RETURN',
+            closed: 'CLOSED'
+        };
+
+        const defaultData = {
+            settings: {
+                appName: 'Healthy Chef',
+                subtitle: 'Inter-Restaurant Material Transfer',
+                logo: '',
+                masterPassword: 'admin123',
+                removedBranches: {},
+                branches: [
+                    { id: 'janakpuri', name: 'Healthy Chef - Janakpuri', password: '123456' },
+                    { id: 'rajouri', name: 'Healthy Chef - Rajouri', password: '123456' }
+                ]
+            },
+            transfers: []
+        };
+
+        const el = (id) => document.getElementById(id);
+        const cloneData = (value) => JSON.parse(JSON.stringify(value));
+        const cleanText = (value) => String(value ?? '').replace(/[<>]/g, '').trim();
+
+        let data = loadData();
+        let session = loadSession();
+        let activeManagerTab = 'send';
+        let toastTimer = null;
+
+        const branchById = (id) => data.settings.branches.find((branch) => branch.id === id);
+        const branchName = (id) => branchById(id)?.name || data.settings.removedBranches?.[id] || 'Removed Branch';
+        const shortBranchName = (idOrName) => {
+            const raw = branchById(idOrName)?.name || data.settings.removedBranches?.[idOrName] || String(idOrName || '');
+            return raw.replace(/^Healthy Chef\s*-\s*/i, '').trim() || raw.trim();
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            bindEvents();
+            normalizeAndCleanupData(false);
+            if (session.role === 'manager') {
+                showScreen('screenManager');
+                activeManagerTab = 'dashboard';
+                switchManagerTab('dashboard');
+            } else if (session.role === 'master') {
+                showScreen('screenMaster');
+            }
+            renderAll();
+            // ✅ Firebase real-time listener - sab devices sync rahenge
+            startFirebaseListener();
+            setInterval(() => {
+                if (session.role === 'manager' && activeManagerTab === 'dashboard') renderDashboard();
+            }, 60000);
+        });
+
+        function bindEvents() {
+            el('inputAuthRole').addEventListener('change', toggleAuthRole);
+            el('togglePasswordBtn').addEventListener('click', togglePasswordDisplay);
+            el('loginBtn').addEventListener('click', executeAuthenticationRequest);
+            el('inputAuthPassword').addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') executeAuthenticationRequest();
+            });
+            el('logoutBtn').addEventListener('click', processSignOut);
+            el('managerLogoutBtn').addEventListener('click', processSignOut);
+            el('saveBranchPasswordBtn').addEventListener('click', changeBranchPassword);
+            el('sendForm').addEventListener('submit', submitTransfer);
+            el('addItemRowBtn').addEventListener('click', addExtraItemRow);
+            el('sendReturnRequired').addEventListener('change', () => {
+                el('sendReturnRequired').checked = true;
+                el('returnDaysWrap').classList.remove('hidden');
+            });
+            document.querySelectorAll('.manager-tab').forEach((button) => {
+                button.addEventListener('click', () => switchManagerTab(button.dataset.tab));
+            });
+            el('reportStatusFilter').addEventListener('change', renderReports);
+            el('downloadReportBtn').addEventListener('click', () => downloadExcel('branch'));
+            el('reportExportFilterType').addEventListener('change', toggleReportExportInputs);
+            el('downloadReportFilteredBtn').addEventListener('click', () => downloadExcel('branchFiltered'));
+            el('cleanupBtn').addEventListener('click', () => {
+                normalizeAndCleanupData(true);
+                showToast('Dashboard queue checked. Closed and completed transfers are hidden.');
+            });
+            el('logoInputHeader').addEventListener('change', handleLogoUpload);
+            el('headerLogoBox').addEventListener('click', (e) => {
+                if (session.role !== 'master') { e.preventDefault(); e.stopPropagation(); return; }
+                el('logoInputHeader').click();
+            });
+            el('saveAppSettingsBtn').addEventListener('click', saveAppSettings);
+            el('saveMasterPasswordBtn').addEventListener('click', changeMasterPassword);
+            el('addBranchBtn').addEventListener('click', addBranch);
+            el('masterExcelBtn').addEventListener('click', () => downloadExcel('master'));
+            el('masterExportFilterType').addEventListener('change', toggleMasterExportInputs);
+            el('masterCleanupBtn').addEventListener('click', () => {
+                normalizeAndCleanupData(true);
+                showToast('Cleanup complete. Action queue filters verified.');
+            });
+            el('deleteClosedBtn').addEventListener('click', deleteClosedTransfers);
+            el('deleteAllTransfersBtn').addEventListener('click', deleteAllTransfers);
+
+            // Secret 7-tap on login logo to reveal master login
+            let logoTapCount = 0;
+            let logoTapTimer = null;
+            el('loginLogoTapArea').addEventListener('click', () => {
+                logoTapCount++;
+                clearTimeout(logoTapTimer);
+                if (logoTapCount >= 7) {
+                    logoTapCount = 0;
+                    el('masterLoginRow').classList.remove('hidden');
+                    el('masterLoginRow').classList.add('flex');
+                    el('inputAuthRole').value = 'master';
+                    toggleAuthRole();
+                    showToast('Master login unlocked.');
+                } else {
+                    logoTapTimer = setTimeout(() => { logoTapCount = 0; }, 2000);
+                }
+            });
+        }
+
+        function loadData() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+                if (!saved || !saved.settings || !Array.isArray(saved.settings.branches)) return cloneData(defaultData);
+                const merged = {
+                    settings: { ...cloneData(defaultData.settings), ...saved.settings },
+                    transfers: Array.isArray(saved.transfers) ? saved.transfers : []
+                };
+                merged.settings.removedBranches = merged.settings.removedBranches || {};
+                if (!merged.settings.branches.length) merged.settings.branches = cloneData(defaultData.settings.branches);
+                return merged;
+            } catch (error) {
+                return cloneData(defaultData);
+            }
+        }
+
+        function loadSession() {
+            try {
+                const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY + '_session'));
+                return (saved && saved.role) ? saved : { role: null, branchId: null };
+            } catch (error) {
+                return { role: null, branchId: null };
+            }
+        }
+
+        function saveData() {
+            // ✅ localStorage backup + Firebase mein save
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            sessionStorage.setItem(STORAGE_KEY + '_session', JSON.stringify(session));
+            if (firebaseReady) {
+                DATA_REF.set(data).catch((err) => {
+                    console.warn('Firebase save error:', err);
+                });
+            }
+        }
+
+        // ✅ Firebase Real-Time Listener
+        function startFirebaseListener() {
+            DATA_REF.on('value', (snapshot) => {
+                const firebaseData = snapshot.val();
+                if (!firebaseData) {
+                    firebaseReady = true;
+                    DATA_REF.set(data);
+                    el('loadingOverlay').classList.add('hidden');
+                    return;
+                }
+                const merged = {
+                    settings: { ...cloneData(defaultData.settings), ...firebaseData.settings },
+                    transfers: Array.isArray(firebaseData.transfers) ? firebaseData.transfers : []
+                };
+                merged.settings.removedBranches = merged.settings.removedBranches || {};
+                if (!merged.settings.branches || !merged.settings.branches.length) {
+                    merged.settings.branches = cloneData(defaultData.settings.branches);
+                }
+                data = merged;
+                firebaseReady = true;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                renderAll();
+                el('loadingOverlay').classList.add('hidden');
+            }, (error) => {
+                console.warn('Firebase error:', error);
+                firebaseReady = false;
+                el('loadingOverlay').classList.add('hidden');
+                showToast('⚠️ Offline mode - changes sirf is device par save honge');
+            });
+        }
+
+        function renderAll() {
+            renderLogo();
+            renderHeader();
+            renderLoginBranches();
+            if (session.role === 'manager') {
+                renderManagerShell();
+                renderDashboard();
+                renderReports();
+            }
+            if (session.role === 'master') renderMaster();
+        }
+
+        function renderHeader() {
+            const appName = data.settings.appName || 'Healthy Chef';
+            if (session.role === 'manager') {
+                el('appHeaderTitle').textContent = `${appName} - ${shortBranchName(session.branchId)} Welcome`;
+            } else if (session.role === 'master') {
+                el('appHeaderTitle').textContent = `${appName} - Master Welcome`;
+            } else {
+                el('appHeaderTitle').textContent = appName;
+            }
+            el('appHeaderSubtitle').textContent = data.settings.subtitle || 'Inter-Restaurant Material Transfer';
+            el('logoutBtn').classList.toggle('hidden', !session.role);
+        }
+
+        function renderLogo() {
+            const logo = data.settings.logo;
+            ['headerLogoImg', 'loginLogoImg'].forEach((id) => {
+                const img = el(id);
+                img.style.display = logo ? 'block' : 'none';
+                if (logo) {
+                    img.onerror = () => {
+                        data.settings.logo = '';
+                        saveData();
+                        renderLogo();
+                        showToast('Logo file could not load. Please upload again.');
+                    };
+                    img.src = logo;
+                } else {
+                    img.onerror = null;
+                    img.removeAttribute('src');
+                }
+            });
+            ['headerLogoPlaceholder', 'loginLogoPlaceholder'].forEach((id) => {
+                const placeholder = el(id);
+                placeholder.classList.toggle('is-hidden', !!logo);
+                placeholder.style.display = logo ? 'none' : 'inline-block';
+            });
+        }
+
+        function renderLoginBranches() {
+            const select = el('inputAuthBranch');
+            select.innerHTML = '';
+            data.settings.branches.forEach((branch) => {
+                const option = document.createElement('option');
+                option.value = branch.id;
+                option.textContent = branch.name;
+                select.appendChild(option);
+            });
+        }
+
+        function toggleAuthRole() {
+            const isMaster = el('inputAuthRole').value === 'master';
+            el('containerBranchSelection').classList.toggle('hidden', isMaster);
+        }
+
+        function togglePasswordDisplay() {
+            const input = el('inputAuthPassword');
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        function executeAuthenticationRequest() {
+            const role = el('inputAuthRole').value;
+            const password = el('inputAuthPassword').value;
+            if (role === 'master') {
+                if (password !== data.settings.masterPassword) {
+                    showToast('Wrong master password.');
+                    return;
+                }
+                session = { role: 'master', branchId: null };
+                saveData();
+                showScreen('screenMaster');
+                showToast('Master login successful.');
+            } else {
+                const branch = branchById(el('inputAuthBranch').value);
+                if (!branch || password !== branch.password) {
+                    showToast('Wrong branch password.');
+                    return;
+                }
+                session = { role: 'manager', branchId: branch.id };
+                saveData();
+                activeManagerTab = 'send';
+                showScreen('screenManager');
+                switchManagerTab('send');
+                showToast(`${shortBranchName(branch.id)} Welcome`);
+            }
+            el('inputAuthPassword').value = '';
+            renderAll();
+        }
+
+        function processSignOut() {
+            session = { role: null, branchId: null };
+            sessionStorage.removeItem(STORAGE_KEY + '_session');
+            saveData();
+            // Hide master login row and reset role to manager
+            el('masterLoginRow').classList.add('hidden');
+            el('masterLoginRow').classList.remove('flex');
+            el('inputAuthRole').value = 'manager';
+            toggleAuthRole();
+            showScreen('screenAuth');
+            renderHeader();
+            showToast('Logged out.');
+        }
+
+        function showScreen(id) {
+            document.querySelectorAll('.screen').forEach((screen) => screen.classList.remove('active'));
+            el(id).classList.add('active');
+        }
+
+        function switchManagerTab(tab) {
+            activeManagerTab = tab;
+            document.querySelectorAll('.manager-tab').forEach((button) => {
+                const isActive = button.dataset.tab === tab;
+                button.classList.toggle('bg-white', isActive);
+                button.classList.toggle('text-blue-900', isActive);
+                button.classList.toggle('shadow', isActive);
+                button.classList.toggle('text-slate-600', !isActive);
+            });
+            document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.remove('active'));
+            el(`tab${tab[0].toUpperCase()}${tab.slice(1)}`).classList.add('active');
+            if (tab === 'dashboard') renderDashboard();
+            if (tab === 'reports') renderReports();
+            if (tab === 'send') renderSendForm();
+            if (tab === 'settings') renderSettings();
+        }
+
+        function renderManagerShell() {
+            renderSendForm();
+            renderSettings();
+            const banner = el('managerBanner');
+            banner.textContent = `${shortBranchName(session.branchId)} Welcome - you are logged in as ${branchName(session.branchId)}.`;
+            banner.classList.remove('hidden');
+        }
+
+        function renderSendForm() {
+            if (!session.branchId) return;
+            el('sendFromBranch').textContent = branchName(session.branchId);
+            const select = el('sendToBranch');
+            select.innerHTML = '';
+            data.settings.branches
+                .filter((branch) => branch.id !== session.branchId)
+                .forEach((branch) => {
+                    const option = document.createElement('option');
+                    option.value = branch.id;
+                    option.textContent = branch.name;
+                    select.appendChild(option);
+                });
+        }
+
+        function addExtraItemRow() {
+            const row = document.createElement('div');
+            row.className = 'extra-item-row rounded-xl border border-slate-200 bg-slate-50 p-3 flex flex-col gap-3';
+            row.innerHTML = `
+                <div class="flex items-center justify-between gap-2">
+                    <label class="text-xs font-bold uppercase text-slate-600">Additional Item</label>
+                    <button class="remove-extra-item rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700" type="button">Remove</button>
+                </div>
+                <input class="extra-item-name rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" type="text" placeholder="Example: Lettuce" required>
+                <div class="grid grid-cols-[1fr_110px] gap-3">
+                    <input class="extra-item-qty rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" type="number" min="1" step="1" value="1" required>
+                    <select class="extra-item-unit rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+                        <option>pcs</option>
+                        <option>kg</option>
+                        <option>ltr</option>
+                        <option>box</option>
+                        <option>pkt</option>
+                    </select>
+                </div>
+            `;
+            row.querySelector('.remove-extra-item').addEventListener('click', () => row.remove());
+            el('extraItemsContainer').appendChild(row);
+        }
+
+        function collectTransferItems() {
+            const items = [{
+                itemName: cleanText(el('sendItemName').value),
+                quantity: Number(el('sendQty').value),
+                unit: cleanText(el('sendUnit').value) || 'pcs'
+            }];
+            document.querySelectorAll('.extra-item-row').forEach((row) => {
+                items.push({
+                    itemName: cleanText(row.querySelector('.extra-item-name').value),
+                    quantity: Number(row.querySelector('.extra-item-qty').value),
+                    unit: cleanText(row.querySelector('.extra-item-unit').value) || 'pcs'
+                });
+            });
+            return items;
+        }
+
+        function submitTransfer(event) {
+            event.preventDefault();
+            const items = collectTransferItems();
+            const toBranchId = el('sendToBranch').value;
+            if (!toBranchId || items.some((item) => !item.itemName || !item.quantity || item.quantity < 1)) {
+                showToast('Please fill all item names, quantities and destination.');
+                return;
+            }
+            const now = new Date();
+            const returnRequired = true;
+            const returnAfterDays = Math.max(1, Number(el('sendReturnDays').value) || 1);
+            const dueDate = addDays(now, returnAfterDays).toISOString();
+            const transfer = {
+                id: nextTransferId(),
+                itemName: items[0].itemName,
+                quantity: items[0].quantity,
+                unit: items[0].unit,
+                items,
+                fromBranchId: session.branchId,
+                toBranchId,
+                status: 'sent',
+                returnRequired,
+                returnAfterDays,
+                dueDate,
+                sentAt: now.toISOString(),
+                acknowledgedAt: '',
+                returnedAt: '',
+                receivedAt: '',
+                closedAt: '',
+                note: cleanText(el('sendNote').value),
+                history: [makeHistory('Sent', `${branchName(session.branchId)} sent to ${branchName(toBranchId)}.`)]
+            };
+            data.transfers.unshift(transfer);
+            saveData();
+            event.target.reset();
+            el('extraItemsContainer').innerHTML = '';
+            el('sendQty').value = 1;
+            el('sendReturnRequired').checked = true;
+            el('sendReturnDays').value = 2;
+            el('returnDaysWrap').classList.remove('hidden');
+            renderAll();
+            showToast('Transfer sent. Receiver will acknowledge it.');
+        }
+
+        function renderDashboard() {
+            const queue = getActionQueueForBranch(session.branchId);
+            renderDashboardAlerts(queue);
+            const container = el('actionQueue');
+            container.innerHTML = '';
+            if (!queue.length) {
+                container.innerHTML = `<div class="py-12 text-center text-sm text-slate-500"><i class="fa-solid fa-circle-check mb-3 block text-4xl text-slate-300"></i>No pending action. Closed transfers are already removed from dashboard.</div>`;
+                return;
+            }
+            queue.forEach((transfer) => container.appendChild(createTransferCard(transfer, 'dashboard')));
+        }
+
+        function getActionQueueForBranch(branchId) {
+            return data.transfers.filter((transfer) => {
+                if (transfer.status === 'closed') return false;
+                return transfer.fromBranchId === branchId || transfer.toBranchId === branchId;
+            });
+        }
+
+        function renderDashboardAlerts(queue) {
+            const alerts = el('dashboardAlerts');
+            alerts.innerHTML = '';
+            const sentCount = queue.filter((transfer) => transfer.status === 'sent').length;
+            const acknowledgedCount = queue.filter((transfer) => transfer.status === 'acknowledged').length;
+            const receivedCount = queue.filter((transfer) => transfer.status === 'returned').length;
+            const overdueCount = queue.filter(isOverdue).length;
+            if (overdueCount) alerts.appendChild(alertBox('danger', `${overdueCount} return alert overdue after days. Please return now.`));
+            if (sentCount) alerts.appendChild(alertBox('info', `${sentCount} transfer(s) waiting for acknowledgement.`));
+            if (acknowledgedCount) alerts.appendChild(alertBox('warning', `${acknowledgedCount} acknowledged transfer(s) waiting for Mark Return.`));
+            if (receivedCount) alerts.appendChild(alertBox('success', `${receivedCount} returned transfer(s) waiting for Received Done.`));
+            if (!alerts.children.length) alerts.appendChild(alertBox('success', 'No pending return or after-days alert.'));
+        }
+
+        function alertBox(type, text) {
+            const div = document.createElement('div');
+            const classes = {
+                danger: 'border-red-200 bg-red-50 text-red-800',
+                warning: 'border-amber-300 bg-amber-50 text-amber-800',
+                info: 'border-blue-200 bg-blue-50 text-blue-900',
+                success: 'border-green-200 bg-green-50 text-green-800'
+            };
+            div.className = `rounded-xl border px-3 py-3 text-sm font-bold ${classes[type]}`;
+            div.textContent = text;
+            return div;
+        }
+
+        function createTransferCard(transfer, mode) {
+            const card = document.createElement('article');
+            const overdue = isOverdue(transfer);
+            const transferItems = getTransferItems(transfer);
+            const itemsHtml = transferItems.map((item) => `
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <h3 class="text-lg font-bold text-slate-950">${cleanText(item.itemName)}</h3>
+                    <span class="rounded-lg bg-blue-50 px-2 py-1 text-sm font-bold text-blue-900">x${cleanText(item.quantity)} ${cleanText(item.unit || '')}</span>
+                </div>
+            `).join('');
+            card.className = `rounded-2xl border bg-white p-4 shadow-sm ${overdue ? 'border-red-300' : 'border-slate-200'}`;
+            card.innerHTML = `
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="text-sm text-slate-500">Transfer #${cleanText(transfer.id)}</div>
+                        ${itemsHtml}
+                    </div>
+                    <span class="status-${transfer.status} rounded-lg px-3 py-2 text-xs font-extrabold uppercase">${STATUS_LABELS[transfer.status] || transfer.status}</span>
+                </div>
+                <div class="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm text-slate-600">
+                    <div class="min-w-0"><i class="fa-solid fa-arrow-right-from-bracket text-red-600"></i> ${cleanText(shortBranchName(transfer.fromBranchId))}</div>
+                    <div class="text-slate-400">to</div>
+                    <div class="min-w-0 text-right"><i class="fa-solid fa-arrow-right-to-bracket text-green-700"></i> ${cleanText(shortBranchName(transfer.toBranchId))}</div>
+                </div>
+                <div class="mt-3 flex flex-col gap-1 text-sm text-slate-500">
+                    <div><i class="fa-solid fa-clock"></i> Sent: ${formatDateTime(transfer.sentAt)}</div>
+                    ${transfer.dueDate ? `<div class="${overdue ? 'font-bold text-red-700' : ''}"><i class="fa-solid fa-bell"></i> Return alert: ${formatDueText(transfer)}</div>` : ''}
+                    ${transfer.note ? `<div><i class="fa-solid fa-note-sticky"></i> ${cleanText(transfer.note)}</div>` : ''}
+                </div>
+                <div class="action-row mt-4 flex flex-wrap gap-2"></div>
+            `;
+            const actionRow = card.querySelector('.action-row');
+            if (mode === 'dashboard') appendDashboardActions(actionRow, transfer);
+            if (mode === 'report') appendReportActions(actionRow, transfer);
+            return card;
+        }
+
+        function appendDashboardActions(row, transfer) {
+            if (transfer.status === 'sent' && transfer.toBranchId === session.branchId) {
+                row.appendChild(actionButton('Acknowledge', 'fa-check', 'bg-blue-100 text-blue-900', () => acknowledgeTransfer(transfer.id)));
+            }
+            if (transfer.status === 'acknowledged' && transfer.toBranchId === session.branchId) {
+                row.appendChild(actionButton('Mark Return', 'fa-truck-ramp-box', 'bg-amber-100 text-amber-900', () => markReturned(transfer.id)));
+            }
+            if (transfer.status === 'returned' && transfer.fromBranchId === session.branchId) {
+                row.appendChild(actionButton('Received Done', 'fa-circle-check', 'bg-green-100 text-green-900', () => markReceivedDone(transfer.id)));
+            }
+        }
+
+        function getTransferItems(transfer) {
+            if (Array.isArray(transfer.items) && transfer.items.length) {
+                return transfer.items.map((item) => ({
+                    itemName: cleanText(item.itemName || item.name || 'Item'),
+                    quantity: Math.max(1, Number(item.quantity || item.qty || 1)),
+                    unit: cleanText(item.unit || 'pcs')
+                }));
+            }
+            return [{
+                itemName: cleanText(transfer.itemName || transfer.item || 'Item'),
+                quantity: Math.max(1, Number(transfer.quantity || transfer.qty || 1)),
+                unit: cleanText(transfer.unit || 'pcs')
+            }];
+        }
+
+        function appendReportActions(row, transfer) {
+            const historyBtn = actionButton('History', 'fa-clock-rotate-left', 'bg-slate-100 text-slate-700', () => showHistory(transfer));
+            row.appendChild(historyBtn);
+            if (session.role === 'master') {
+                const deleteBtn = actionButton('Delete', 'fa-trash', 'bg-red-50 text-red-700 border border-red-200', () => deleteSingleTransfer(transfer.id));
+                row.appendChild(deleteBtn);
+            }
+        }
+
+        function actionButton(label, icon, classes, handler) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `rounded-xl px-3 py-2 text-sm font-bold ${classes}`;
+            button.innerHTML = `<i class="fa-solid ${icon}"></i> ${label}`;
+            button.addEventListener('click', handler);
+            return button;
+        }
+
+        function acknowledgeTransfer(id) {
+            const transfer = data.transfers.find((item) => item.id === id);
+            if (!transfer || transfer.status !== 'sent' || transfer.toBranchId !== session.branchId) return;
+            transfer.status = 'acknowledged';
+            transfer.acknowledgedAt = new Date().toISOString();
+            transfer.history.push(makeHistory('Acknowledge', `${branchName(session.branchId)} acknowledged transfer.`));
+            saveData();
+            renderAll();
+            showToast('Acknowledged. Next step is Mark Return.');
+        }
+
+        function markReturned(id) {
+            const transfer = data.transfers.find((item) => item.id === id);
+            if (!transfer || transfer.status !== 'acknowledged' || transfer.toBranchId !== session.branchId) return;
+            transfer.status = 'returned';
+            transfer.returnedAt = new Date().toISOString();
+            transfer.history.push(makeHistory('Mark Return', `${branchName(session.branchId)} marked item returned.`));
+            saveData();
+            renderAll();
+            showToast('Mark Return done. Sender will complete Received Done.');
+        }
+
+        function markReceivedDone(id) {
+            const transfer = data.transfers.find((item) => item.id === id);
+            if (!transfer || transfer.status !== 'returned' || transfer.fromBranchId !== session.branchId) return;
+            transfer.status = 'closed';
+            transfer.receivedAt = new Date().toISOString();
+            transfer.closedAt = transfer.receivedAt;
+            transfer.history.push(makeHistory('Received Done', `${branchName(session.branchId)} received return.`));
+            transfer.history.push(makeHistory('Transfer Close Automatic', 'Transfer closed and removed from dashboard action queue.'));
+            saveData();
+            renderAll();
+            showToast('Received Done. Transfer closed and removed from dashboard.');
+        }
+
+        function renderReports() {
+            const list = el('reportsList');
+            list.innerHTML = '';
+            const transfers = data.transfers.filter((transfer) => {
+                const mine = transfer.fromBranchId === session.branchId || transfer.toBranchId === session.branchId;
+                return mine && transfer.status === 'closed';
+            });
+            if (!transfers.length) {
+                list.innerHTML = `<div class="py-10 text-center text-sm text-slate-500"><i class="fa-solid fa-file-circle-xmark mb-3 block text-4xl text-slate-300"></i>No report data found.</div>`;
+                return;
+            }
+            transfers.forEach((transfer) => list.appendChild(createTransferCard(transfer, 'report')));
+        }
+
+        function renderSettings() {
+            el('settingsLoginName').textContent = `${shortBranchName(session.branchId)} Welcome - ${branchName(session.branchId)}`;
+        }
+
+        function changeBranchPassword() {
+            const branch = branchById(session.branchId);
+            if (!branch) {
+                showToast('Branch login not found. Please login again.');
+                return;
+            }
+            const currentPassword = el('branchCurrentPassword').value;
+            const newPassword = cleanText(el('branchNewPassword').value);
+            const confirmPassword = cleanText(el('branchConfirmPassword').value);
+            if (currentPassword !== branch.password) {
+                showToast('Current branch password is wrong.');
+                return;
+            }
+            if (newPassword.length < 4) {
+                showToast('New branch password must be at least 4 characters.');
+                return;
+            }
+            if (newPassword !== confirmPassword) {
+                showToast('New password and confirm password do not match.');
+                return;
+            }
+            branch.password = newPassword;
+            ['branchCurrentPassword', 'branchNewPassword', 'branchConfirmPassword'].forEach((id) => el(id).value = '');
+            saveData();
+            showToast('Branch password changed successfully.');
+        }
+
+        function renderMaster() {
+            el('masterAppName').value = data.settings.appName;
+            el('masterSubtitle').value = data.settings.subtitle;
+            renderMasterBranches();
+            renderMasterExportBranchOptions();
+            toggleMasterExportInputs();
+            renderMasterTransfers();
+        }
+
+        function renderMasterExportBranchOptions() {
+            const selected = el('masterExportBranch').value || 'ALL';
+            const select = el('masterExportBranch');
+            select.innerHTML = '<option value="ALL">All Branches</option>';
+            data.settings.branches.forEach((branch) => {
+                const option = document.createElement('option');
+                option.value = branch.id;
+                option.textContent = branch.name;
+                select.appendChild(option);
+            });
+            const hasSelectedBranch = data.settings.branches.some((branch) => branch.id === selected);
+            select.value = hasSelectedBranch ? selected : 'ALL';
+        }
+
+        function toggleMasterExportInputs() {
+            const type = el('masterExportFilterType').value;
+            el('masterExportDateRange').classList.toggle('hidden', type !== 'dateRange');
+            el('masterExportMonthWrap').classList.toggle('hidden', type !== 'month');
+        }
+
+        function toggleReportExportInputs() {
+            const type = el('reportExportFilterType').value;
+            el('reportExportDateRange').classList.toggle('hidden', type !== 'dateRange');
+            el('reportExportMonthWrap').classList.toggle('hidden', type !== 'month');
+        }
+
+        function renderMasterBranches() {
+            const list = el('masterBranchList');
+            list.innerHTML = '';
+            data.settings.branches.forEach((branch) => {
+                const row = document.createElement('div');
+                row.className = 'rounded-xl border border-slate-200 bg-slate-50 p-3 flex flex-col gap-2';
+                row.innerHTML = `
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="font-bold text-slate-900">${cleanText(branch.name)}</div>
+                        <button class="remove-branch rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700" data-id="${branch.id}" type="button">Remove</button>
+                    </div>
+                    <div class="grid grid-cols-[1fr_auto] gap-2">
+                        <input class="branch-password rounded-lg border border-slate-300 px-3 py-2 text-sm" data-id="${branch.id}" type="text">
+                        <button class="save-branch rounded-lg bg-blue-900 px-3 py-2 text-sm font-bold text-white" data-id="${branch.id}" type="button">Save</button>
+                    </div>
+                    <button class="delete-branch-data rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800" data-id="${branch.id}" type="button">Delete This Branch Transfer Data</button>
+                `;
+                row.querySelector('.branch-password').value = branch.password;
+                row.querySelector('.save-branch').addEventListener('click', () => {
+                    const input = row.querySelector('.branch-password');
+                    branch.password = cleanText(input.value) || '123456';
+                    saveData();
+                    showToast('Branch password saved.');
+                });
+                row.querySelector('.remove-branch').addEventListener('click', () => removeBranch(branch.id));
+                row.querySelector('.delete-branch-data').addEventListener('click', () => deleteBranchTransfers(branch.id));
+                list.appendChild(row);
+            });
+        }
+
+        function renderMasterTransfers() {
+            const list = el('masterTransferList');
+            list.innerHTML = '';
+            if (!data.transfers.length) {
+                list.innerHTML = `<div class="py-8 text-center text-sm text-slate-500">No transfer records.</div>`;
+                return;
+            }
+            data.transfers.forEach((transfer) => list.appendChild(createTransferCard(transfer, 'report')));
+        }
+
+        function saveAppSettings() {
+            data.settings.appName = cleanText(el('masterAppName').value) || 'Healthy Chef';
+            data.settings.subtitle = cleanText(el('masterSubtitle').value) || 'Inter-Restaurant Material Transfer';
+            saveData();
+            renderAll();
+            showToast('App name saved. Branch welcome will show in header.');
+        }
+
+        function changeMasterPassword() {
+            const currentPassword = el('masterCurrentPassword').value;
+            const newPassword = cleanText(el('masterNewPassword').value);
+            const confirmPassword = cleanText(el('masterConfirmPassword').value);
+            if (currentPassword !== data.settings.masterPassword) {
+                showToast('Current master password is wrong.');
+                return;
+            }
+            if (newPassword.length < 4) {
+                showToast('New master password must be at least 4 characters.');
+                return;
+            }
+            if (newPassword !== confirmPassword) {
+                showToast('New password and confirm password do not match.');
+                return;
+            }
+            data.settings.masterPassword = newPassword;
+            ['masterCurrentPassword', 'masterNewPassword', 'masterConfirmPassword'].forEach((id) => el(id).value = '');
+            saveData();
+            showToast('Master password changed successfully.');
+        }
+
+        function addBranch() {
+            const name = cleanText(el('newBranchName').value);
+            if (!name) {
+                showToast('Enter branch name.');
+                return;
+            }
+            const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `branch-${Date.now()}`;
+            if (branchById(id)) {
+                showToast('Branch already exists.');
+                return;
+            }
+            if (data.settings.removedBranches?.[id]) delete data.settings.removedBranches[id];
+            data.settings.branches.push({ id, name, password: '123456' });
+            el('newBranchName').value = '';
+            saveData();
+            renderAll();
+            showToast('Branch added. Default password is 123456.');
+        }
+
+        function removeBranch(branchId) {
+            const branch = branchById(branchId);
+            if (!branch) return;
+            if (data.settings.branches.length <= 1) {
+                showToast('At least one branch is required.');
+                return;
+            }
+            const hasTransfers = data.transfers.some((transfer) => transfer.fromBranchId === branchId || transfer.toBranchId === branchId);
+            const message = hasTransfers
+                ? `${branch.name} has transfer history. Remove login only and keep history in reports?`
+                : `Remove ${branch.name}?`;
+            if (!confirm(message)) return;
+            data.settings.removedBranches = data.settings.removedBranches || {};
+            data.settings.removedBranches[branchId] = branch.name;
+            data.settings.branches = data.settings.branches.filter((item) => item.id !== branchId);
+            saveData();
+            renderAll();
+            showToast('Branch removed from login. Existing history is preserved.');
+        }
+
+        function deleteBranchTransfers(branchId) {
+            const branch = branchById(branchId) || { name: branchName(branchId) };
+            if (!confirm(`Delete all transfer records linked with ${branch.name}? This cannot be undone.`)) return;
+            const before = data.transfers.length;
+            data.transfers = data.transfers.filter((transfer) => transfer.fromBranchId !== branchId && transfer.toBranchId !== branchId);
+            saveData();
+            renderAll();
+            showToast(`${before - data.transfers.length} transfer(s) deleted for this branch.`);
+        }
+
+        function handleLogoUpload(event) {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                normalizeLogoImage(reader.result, (logoDataUrl) => {
+                    data.settings.logo = logoDataUrl;
+                    saveData();
+                    renderLogo();
+                    showToast('Logo updated and fitted correctly.');
+                });
+            };
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        }
+
+        function normalizeLogoImage(source, callback) {
+            const image = new Image();
+            image.onload = () => {
+                const canvas = document.createElement('canvas');
+                const size = 512;
+                canvas.width = size;
+                canvas.height = size;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, size, size);
+                const scale = Math.min((size - 48) / image.width, (size - 48) / image.height);
+                const width = image.width * scale;
+                const height = image.height * scale;
+                const x = (size - width) / 2;
+                const y = (size - height) / 2;
+                ctx.drawImage(image, x, y, width, height);
+                callback(canvas.toDataURL('image/png'));
+            };
+            image.onerror = () => showToast('Logo file could not be read. Please select another image.');
+            image.src = source;
+        }
+
+        function normalizeAndCleanupData(showMessage) {
+            const seen = new Set();
+            data.transfers = data.transfers
+                .filter((transfer) => transfer && (transfer.id || transfer.itemName))
+                .map((transfer, index) => {
+                    const id = cleanText(transfer.id) || `TR-${Date.now()}-${index}`;
+                    const statusMap = {
+                        pending: 'sent',
+                        acknowledge: 'acknowledged',
+                        acknowledged: 'acknowledged',
+                        'return-required': 'returned',
+                        returnRequired: 'returned',
+                        return_required: 'returned',
+                        received: 'closed',
+                        done: 'closed',
+                        close: 'closed'
+                    };
+                    const status = statusMap[transfer.status] || transfer.status || 'sent';
+                    const normalizedReturnRequired = Boolean(transfer.returnRequired || ['acknowledged', 'returned'].includes(status));
+                    const returnAfterDays = Number(transfer.returnAfterDays || transfer.afterDays || 2);
+                    const sentAtRaw = transfer.sentAt || transfer.createdAt || new Date().toISOString();
+                    const sentAtDate = new Date(sentAtRaw);
+                    const sentAt = Number.isNaN(sentAtDate.getTime()) ? new Date().toISOString() : sentAtDate.toISOString();
+                    const dueDate = transfer.dueDate || (normalizedReturnRequired && ['sent', 'acknowledged'].includes(status) ? addDays(new Date(sentAt), returnAfterDays).toISOString() : '');
+                    const items = getTransferItems(transfer);
+                    return {
+                        id,
+                        itemName: items[0].itemName,
+                        quantity: items[0].quantity,
+                        unit: items[0].unit,
+                        items,
+                        fromBranchId: transfer.fromBranchId || transfer.from || data.settings.branches[0]?.id,
+                        toBranchId: transfer.toBranchId || transfer.to || data.settings.branches[1]?.id || data.settings.branches[0]?.id,
+                        status: ['sent', 'acknowledged', 'returned', 'closed'].includes(status) ? status : 'sent',
+                        returnRequired: normalizedReturnRequired,
+                        returnAfterDays,
+                        dueDate,
+                        sentAt,
+                        acknowledgedAt: transfer.acknowledgedAt || '',
+                        returnedAt: transfer.returnedAt || '',
+                        receivedAt: transfer.receivedAt || '',
+                        closedAt: transfer.closedAt || '',
+                        note: cleanText(transfer.note || ''),
+                        history: Array.isArray(transfer.history) ? transfer.history : [makeHistory('Migrated', 'Transfer normalized by cleanup.')]
+                    };
+                })
+                .filter((transfer) => {
+                    if (seen.has(transfer.id)) return false;
+                    seen.add(transfer.id);
+                    return true;
+                });
+            saveData();
+            if (showMessage) renderAll();
+        }
+
+        function deleteClosedTransfers() {
+            if (!confirm('Delete all closed transfer records? Pending dashboard items will remain.')) return;
+            const before = data.transfers.length;
+            data.transfers = data.transfers.filter((transfer) => transfer.status !== 'closed');
+            saveData();
+            renderAll();
+            showToast(`${before - data.transfers.length} closed transfer(s) deleted.`);
+        }
+
+        function deleteAllTransfers() {
+            if (!confirm('Delete ALL transfer records from every branch? This cannot be undone.')) return;
+            if (!confirm('Final confirmation: all reports and dashboard transfer data will be cleared.')) return;
+            const before = data.transfers.length;
+            data.transfers = [];
+            saveData();
+            renderAll();
+            showToast(`${before} transfer record(s) deleted.`);
+        }
+
+        function deleteSingleTransfer(id) {
+            const transfer = data.transfers.find((item) => item.id === id);
+            if (!transfer) return;
+            if (!confirm(`Transfer #${transfer.id} ko delete karna chahte hain? Yeh undo nahi ho sakta.`)) return;
+            data.transfers = data.transfers.filter((item) => item.id !== id);
+            saveData();
+            renderAll();
+            showToast(`Transfer #${id} delete ho gaya.`);
+        }
+
+        function downloadExcel(scope) {
+            const filteredTransfers = getTransfersForExcel(scope);
+            if (filteredTransfers === null) return;
+            const rows = filteredTransfers
+                .map((transfer) => ({
+                    ID: transfer.id,
+                    Item: getTransferItems(transfer).map((item) => `${item.itemName} x${item.quantity} ${item.unit}`).join('; '),
+                    Quantity: getTransferItems(transfer).reduce((total, item) => total + Number(item.quantity || 0), 0),
+                    Unit: getTransferItems(transfer).length > 1 ? 'mixed' : getTransferItems(transfer)[0].unit,
+                    From: branchName(transfer.fromBranchId),
+                    To: branchName(transfer.toBranchId),
+                    Status: STATUS_LABELS[transfer.status] || transfer.status,
+                    SentAt: formatDateTime(transfer.sentAt),
+                    DueDate: transfer.dueDate ? formatDateTime(transfer.dueDate) : '',
+                    ClosedAt: transfer.closedAt ? formatDateTime(transfer.closedAt) : '',
+                    Note: transfer.note || ''
+                }));
+            if (!rows.length) {
+                showToast('No transfer data to export.');
+                return;
+            }
+            if (window.XLSX) {
+                const worksheet = XLSX.utils.json_to_sheet(rows);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, 'Transfers');
+                XLSX.writeFile(workbook, `healthy-chef-transfers-${new Date().toISOString().slice(0, 10)}.xlsx`);
+            } else {
+                const csv = [Object.keys(rows[0]).join(','), ...rows.map((row) => Object.values(row).map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))].join('\n');
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `healthy-chef-transfers-${new Date().toISOString().slice(0, 10)}.csv`;
+                link.click();
+            }
+            showToast('Report download started.');
+        }
+
+        function getTransfersForExcel(scope) {
+            let transfers = data.transfers.filter((transfer) => scope === 'master' || transfer.fromBranchId === session.branchId || transfer.toBranchId === session.branchId);
+            if (scope !== 'master' && scope !== 'branchFiltered') return transfers;
+
+            if (scope === 'branchFiltered') {
+                const filterType = el('reportExportFilterType').value;
+                if (filterType === 'dateRange') {
+                    const fromDate = el('reportExportFromDate').value;
+                    const toDate = el('reportExportToDate').value;
+                    if (!fromDate || !toDate) { showToast('Select both From Date and To Date.'); return null; }
+                    const start = new Date(`${fromDate}T00:00:00`);
+                    const end = new Date(`${toDate}T23:59:59`);
+                    if (start > end) { showToast('From Date cannot be after To Date.'); return null; }
+                    transfers = transfers.filter((transfer) => isTransferInDateWindow(transfer, start, end));
+                }
+                if (filterType === 'month') {
+                    const month = el('reportExportMonth').value;
+                    if (!month) { showToast('Select month for month-wise export.'); return null; }
+                    const start = new Date(`${month}-01T00:00:00`);
+                    const end = new Date(start);
+                    end.setMonth(end.getMonth() + 1);
+                    transfers = transfers.filter((transfer) => { const d = getTransferReportDate(transfer); return d >= start && d < end; });
+                }
+                return transfers;
+            }
+
+            const branchFilter = el('masterExportBranch').value;
+            if (branchFilter && branchFilter !== 'ALL') {
+                transfers = transfers.filter((transfer) => transfer.fromBranchId === branchFilter || transfer.toBranchId === branchFilter);
+            }
+
+            const filterType = el('masterExportFilterType').value;
+            if (filterType === 'dateRange') {
+                const fromDate = el('masterExportFromDate').value;
+                const toDate = el('masterExportToDate').value;
+                if (!fromDate || !toDate) {
+                    showToast('Select both From Date and To Date.');
+                    return null;
+                }
+                const start = new Date(`${fromDate}T00:00:00`);
+                const end = new Date(`${toDate}T23:59:59`);
+                if (start > end) {
+                    showToast('From Date cannot be after To Date.');
+                    return null;
+                }
+                transfers = transfers.filter((transfer) => isTransferInDateWindow(transfer, start, end));
+            }
+
+            if (filterType === 'month') {
+                const month = el('masterExportMonth').value;
+                if (!month) {
+                    showToast('Select month for month-wise export.');
+                    return null;
+                }
+                const start = new Date(`${month}-01T00:00:00`);
+                const end = new Date(start);
+                end.setMonth(end.getMonth() + 1);
+                transfers = transfers.filter((transfer) => {
+                    const transferDate = getTransferReportDate(transfer);
+                    return transferDate >= start && transferDate < end;
+                });
+            }
+
+            return transfers;
+        }
+
+        function getTransferReportDate(transfer) {
+            const value = transfer.sentAt || transfer.createdAt || transfer.acknowledgedAt || transfer.closedAt;
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? new Date(0) : date;
+        }
+
+        function isTransferInDateWindow(transfer, start, end) {
+            const transferDate = getTransferReportDate(transfer);
+            return transferDate >= start && transferDate <= end;
+        }
+
+        function showHistory(transfer) {
+            const lines = (transfer.history || []).map((entry) => `${formatDateTime(entry.at)} - ${entry.action}: ${entry.text}`).join('\n');
+            alert(lines || 'No history available.');
+        }
+
+        function makeHistory(action, text) {
+            return {
+                at: new Date().toISOString(),
+                actor: session.branchId ? branchName(session.branchId) : 'System',
+                action,
+                text
+            };
+        }
+
+        function nextTransferId() {
+            const max = data.transfers.reduce((highest, transfer) => {
+                const number = Number(String(transfer.id || '').replace(/\D/g, ''));
+                return Number.isFinite(number) ? Math.max(highest, number) : highest;
+            }, 1000);
+            return String(max + 1);
+        }
+
+        function addDays(date, days) {
+            const next = new Date(date);
+            next.setDate(next.getDate() + days);
+            return next;
+        }
+
+        function isOverdue(transfer) {
+            return ['sent', 'acknowledged'].includes(transfer.status) && transfer.dueDate && new Date(transfer.dueDate).getTime() < Date.now();
+        }
+
+        function formatDueText(transfer) {
+            if (!transfer.dueDate) return '';
+            const diff = new Date(transfer.dueDate).getTime() - Date.now();
+            const dayMs = 24 * 60 * 60 * 1000;
+            const days = Math.ceil(Math.abs(diff) / dayMs);
+            if (diff < 0) return `${formatDateTime(transfer.dueDate)} - overdue by ${days} day(s)`;
+            return `${formatDateTime(transfer.dueDate)} - ${days} day(s) left`;
+        }
+
+        function formatDateTime(value) {
+            if (!value) return '-';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return '-';
+            return date.toLocaleString('en-IN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function showToast(message) {
+            const toast = el('toast');
+            toast.textContent = message;
+            toast.classList.remove('hidden');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.add('hidden'), 2600);
+        }
+    </script>
+</body>
+</html>
