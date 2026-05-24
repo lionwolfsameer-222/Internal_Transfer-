@@ -7,6 +7,9 @@
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Firebase Compat SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
     <style>
         :root {
             --primary: #1e3a8a;
@@ -300,6 +303,22 @@
     <div id="toast" class="toast fixed bottom-5 left-1/2 z-50 hidden w-[calc(100%-32px)] max-w-[440px] -translate-x-1/2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-lg"></div>
 
     <script>
+        // ── Firebase Initialization ──────────────────────────────────────────
+        const firebaseConfig = {
+            apiKey: "AIzaSyC-Erc6hv90KP5lkef9nGQxXKM7lkltBHI",
+            authDomain: "lion-wolf.firebaseapp.com",
+            databaseURL: "https://lion-wolf-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "lion-wolf",
+            storageBucket: "lion-wolf.firebasestorage.app",
+            messagingSenderId: "951962934786",
+            appId: "1:951962934786:web:148c039d648423f592511b",
+            measurementId: "G-148ZQNKT01"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const APP_REF = db.ref('healthyChefApp');
+        // ────────────────────────────────────────────────────────────────────
+
         const STORAGE_KEY = 'healthyChefTransferAppV2';
         const STATUS_LABELS = {
             sent: 'PENDING',
@@ -327,10 +346,85 @@
         const cloneData = (value) => JSON.parse(JSON.stringify(value));
         const cleanText = (value) => String(value ?? '').replace(/[<>]/g, '').trim();
 
-        let data = loadData();
+        // ── Firebase helpers ─────────────────────────────────────────────────
+        /** Convert transfers array → Firebase-safe object keyed by sanitised id */
+        function transfersToFirebase(arr) {
+            const obj = {};
+            arr.forEach((t) => {
+                const key = String(t.id).replace(/[.#$[\]]/g, '_');
+                obj[key] = { ...t, items: t.items || [], history: t.history || [] };
+            });
+            return obj;
+        }
+
+        /** Firebase may return numeric-keyed objects instead of arrays – normalise them */
+        function ensureArray(val) {
+            if (!val) return [];
+            if (Array.isArray(val)) return val;
+            return Object.values(val);
+        }
+
+        /** Convert Firebase transfers object → sorted array */
+        function transfersFromFirebase(fbObj) {
+            if (!fbObj) return [];
+            return Object.values(fbObj)
+                .map((t) => ({ ...t, items: ensureArray(t.items), history: ensureArray(t.history) }))
+                .sort((a, b) => new Date(b.sentAt || 0) - new Date(a.sentAt || 0));
+        }
+
+        /** Load full app data from Firebase once */
+        async function loadDataFromFirebase() {
+            try {
+                const snapshot = await APP_REF.once('value');
+                const saved = snapshot.val();
+                if (!saved || !saved.settings || !ensureArray(saved.settings.branches).length) {
+                    return cloneData(defaultData);
+                }
+                const settings = { ...cloneData(defaultData.settings), ...saved.settings };
+                settings.branches = ensureArray(saved.settings.branches);
+                settings.removedBranches = saved.settings.removedBranches || {};
+                return { settings, transfers: transfersFromFirebase(saved.transfers) };
+            } catch (err) {
+                console.error('Firebase load error:', err);
+                showToast('Firebase connection error. Using local defaults.');
+                return cloneData(defaultData);
+            }
+        }
+
+        /** Persist current data to Firebase */
+        function saveData() {
+            _isSaving = true;
+            APP_REF.set({
+                settings: data.settings,
+                transfers: transfersToFirebase(data.transfers)
+            })
+            .then(() => { setTimeout(() => { _isSaving = false; }, 800); })
+            .catch((err) => { console.error('Firebase save error:', err); _isSaving = false; showToast('Save error – check connection.'); });
+            // Session stays in sessionStorage only (device-local)
+            sessionStorage.setItem(STORAGE_KEY + '_session', JSON.stringify(session));
+        }
+
+        /** Real-time listener – syncs changes made on other devices */
+        function setupRealtimeListener() {
+            APP_REF.on('value', (snapshot) => {
+                if (_isSaving) return;          // skip echo of our own saves
+                const saved = snapshot.val();
+                if (!saved || !saved.settings) return;
+                const settings = { ...cloneData(defaultData.settings), ...saved.settings };
+                settings.branches = ensureArray(saved.settings.branches || []);
+                settings.removedBranches = saved.settings.removedBranches || {};
+                data.settings = settings;
+                data.transfers = transfersFromFirebase(saved.transfers);
+                renderAll();
+            });
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
+        let data = cloneData(defaultData);  // overwritten async from Firebase
         let session = loadSession();
         let activeManagerTab = 'send';
         let toastTimer = null;
+        let _isSaving = false;              // guard for real-time listener echo
 
         const branchById = (id) => data.settings.branches.find((branch) => branch.id === id);
         const branchName = (id) => branchById(id)?.name || data.settings.removedBranches?.[id] || 'Removed Branch';
@@ -339,7 +433,11 @@
             return raw.replace(/^Healthy Chef\s*-\s*/i, '').trim() || raw.trim();
         };
 
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 1. Load data from Firebase first (async)
+            data = await loadDataFromFirebase();
+            session = loadSession();
+
             bindEvents();
             normalizeAndCleanupData(false);
             if (session.role === 'manager') {
@@ -350,7 +448,11 @@
                 showScreen('screenMaster');
             }
             renderAll();
-            setTimeout(() => el('loadingOverlay').classList.add('hidden'), 250);
+            el('loadingOverlay').classList.add('hidden');
+
+            // 2. Keep listening for real-time changes (multi-device sync)
+            setupRealtimeListener();
+
             setInterval(() => {
                 if (session.role === 'manager' && activeManagerTab === 'dashboard') renderDashboard();
             }, 60000);
@@ -419,22 +521,6 @@
             });
         }
 
-        function loadData() {
-            try {
-                const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-                if (!saved || !saved.settings || !Array.isArray(saved.settings.branches)) return cloneData(defaultData);
-                const merged = {
-                    settings: { ...cloneData(defaultData.settings), ...saved.settings },
-                    transfers: Array.isArray(saved.transfers) ? saved.transfers : []
-                };
-                merged.settings.removedBranches = merged.settings.removedBranches || {};
-                if (!merged.settings.branches.length) merged.settings.branches = cloneData(defaultData.settings.branches);
-                return merged;
-            } catch (error) {
-                return cloneData(defaultData);
-            }
-        }
-
         function loadSession() {
             try {
                 const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY + '_session'));
@@ -442,11 +528,6 @@
             } catch (error) {
                 return { role: null, branchId: null };
             }
-        }
-
-        function saveData() {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-            sessionStorage.setItem(STORAGE_KEY + '_session', JSON.stringify(session));
         }
 
         function renderAll() {
