@@ -100,7 +100,6 @@
             <button id="loginBtn" class="mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-900 py-4 text-base font-bold text-white active:opacity-80" type="button">
                 Secure Authenticate <i class="fa-solid fa-right-to-bracket"></i>
             </button>
-
         </section>
 
         <section id="screenManager" class="screen flex-col flex-1">
@@ -320,6 +319,7 @@
         // ────────────────────────────────────────────────────────────────────
 
         const STORAGE_KEY = 'healthyChefTransferAppV2';
+        const LOCAL_DATA_KEY = 'healthyChef_localCache'; // Performance cache
         const STATUS_LABELS = {
             sent: 'PENDING',
             acknowledged: 'ACKNOWLEDGED',
@@ -347,7 +347,6 @@
         const cleanText = (value) => String(value ?? '').replace(/[<>]/g, '').trim();
 
         // ── Firebase helpers ─────────────────────────────────────────────────
-        /** Convert transfers array → Firebase-safe object keyed by sanitised id */
         function transfersToFirebase(arr) {
             const obj = {};
             arr.forEach((t) => {
@@ -357,14 +356,12 @@
             return obj;
         }
 
-        /** Firebase may return numeric-keyed objects instead of arrays – normalise them */
         function ensureArray(val) {
             if (!val) return [];
             if (Array.isArray(val)) return val;
             return Object.values(val);
         }
 
-        /** Convert Firebase transfers object → sorted array */
         function transfersFromFirebase(fbObj) {
             if (!fbObj) return [];
             return Object.values(fbObj)
@@ -372,7 +369,14 @@
                 .sort((a, b) => new Date(b.sentAt || 0) - new Date(a.sentAt || 0));
         }
 
-        /** Load full app data from Firebase once */
+        // Fast Load: Check local cache first
+        function getLocalCache() {
+            try {
+                const cached = localStorage.getItem(LOCAL_DATA_KEY);
+                return cached ? JSON.parse(cached) : null;
+            } catch(e) { return null; }
+        }
+
         async function loadDataFromFirebase() {
             try {
                 const snapshot = await APP_REF.once('value');
@@ -383,31 +387,31 @@
                 const settings = { ...cloneData(defaultData.settings), ...saved.settings };
                 settings.branches = ensureArray(saved.settings.branches);
                 settings.removedBranches = saved.settings.removedBranches || {};
-                return { settings, transfers: transfersFromFirebase(saved.transfers) };
+                
+                const finalData = { settings, transfers: transfersFromFirebase(saved.transfers) };
+                localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(finalData));
+                return finalData;
             } catch (err) {
                 console.error('Firebase load error:', err);
-                showToast('Firebase connection error. Using local defaults.');
-                return cloneData(defaultData);
+                return getLocalCache() || cloneData(defaultData);
             }
         }
 
-        /** Persist current data to Firebase */
         function saveData() {
             _isSaving = true;
+            localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(data)); // Immediate local backup save
             APP_REF.set({
                 settings: data.settings,
                 transfers: transfersToFirebase(data.transfers)
             })
             .then(() => { setTimeout(() => { _isSaving = false; }, 800); })
-            .catch((err) => { console.error('Firebase save error:', err); _isSaving = false; showToast('Save error – check connection.'); });
-            // Session stays in sessionStorage only (device-local)
+            .catch((err) => { console.error('Firebase save error:', err); _isSaving = false; showToast('Save error – saved locally.'); });
             sessionStorage.setItem(STORAGE_KEY + '_session', JSON.stringify(session));
         }
 
-        /** Real-time listener – syncs changes made on other devices */
         function setupRealtimeListener() {
             APP_REF.on('value', (snapshot) => {
-                if (_isSaving) return;          // skip echo of our own saves
+                if (_isSaving) return; 
                 const saved = snapshot.val();
                 if (!saved || !saved.settings) return;
                 const settings = { ...cloneData(defaultData.settings), ...saved.settings };
@@ -415,16 +419,17 @@
                 settings.removedBranches = saved.settings.removedBranches || {};
                 data.settings = settings;
                 data.transfers = transfersFromFirebase(saved.transfers);
+                localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(data));
                 renderAll();
             });
         }
         // ─────────────────────────────────────────────────────────────────────
 
-        let data = cloneData(defaultData);  // overwritten async from Firebase
+        let data = getLocalCache() || cloneData(defaultData); // INSTANT INITIALIZATION FROM CACHE 🚀
         let session = loadSession();
         let activeManagerTab = 'send';
         let toastTimer = null;
-        let _isSaving = false;              // guard for real-time listener echo
+        let _isSaving = false; 
 
         const branchById = (id) => data.settings.branches.find((branch) => branch.id === id);
         const branchName = (id) => branchById(id)?.name || data.settings.removedBranches?.[id] || 'Removed Branch';
@@ -433,13 +438,11 @@
             return raw.replace(/^Healthy Chef\s*-\s*/i, '').trim() || raw.trim();
         };
 
-        document.addEventListener('DOMContentLoaded', async () => {
-            // 1. Load data from Firebase first (async)
-            data = await loadDataFromFirebase();
-            session = loadSession();
-
+        // DOM Loaded event streamlined for speed ⚡
+        document.addEventListener('DOMContentLoaded', () => {
             bindEvents();
             normalizeAndCleanupData(false);
+            
             if (session.role === 'manager') {
                 showScreen('screenManager');
                 activeManagerTab = 'dashboard';
@@ -447,11 +450,17 @@
             } else if (session.role === 'master') {
                 showScreen('screenMaster');
             }
+            
+            // Render cached data immediately so user feels 0ms delay
             renderAll();
             el('loadingOverlay').classList.add('hidden');
 
-            // 2. Keep listening for real-time changes (multi-device sync)
-            setupRealtimeListener();
+            // Fetch absolute fresh data from Firebase in the background
+            loadDataFromFirebase().then((freshData) => {
+                data = freshData;
+                renderAll();
+                setupRealtimeListener();
+            });
 
             setInterval(() => {
                 if (session.role === 'manager' && activeManagerTab === 'dashboard') renderDashboard();
@@ -502,7 +511,6 @@
             el('deleteClosedBtn').addEventListener('click', deleteClosedTransfers);
             el('deleteAllTransfersBtn').addEventListener('click', deleteAllTransfers);
 
-            // Secret 7-tap on login logo to reveal master login
             let logoTapCount = 0;
             let logoTapTimer = null;
             el('loginLogoTapArea').addEventListener('click', () => {
@@ -634,7 +642,6 @@
             session = { role: null, branchId: null };
             sessionStorage.removeItem(STORAGE_KEY + '_session');
             saveData();
-            // Hide master login row and reset role to manager
             el('masterLoginRow').classList.add('hidden');
             el('masterLoginRow').classList.remove('flex');
             el('inputAuthRole').value = 'manager';
@@ -1284,7 +1291,8 @@
                 XLSX.utils.book_append_sheet(workbook, worksheet, 'Transfers');
                 XLSX.writeFile(workbook, `healthy-chef-transfers-${new Date().toISOString().slice(0, 10)}.xlsx`);
             } else {
-                const csv = [Object.keys(rows[0]).join(','), ...rows.map((row) => Object.values(row).map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))].join('\n');
+                const csv = [Object.keys(rows[0]).join(','), ...rows.map((row) => Object.values(row).map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))].join('
+');
                 const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(blob);
@@ -1329,25 +1337,16 @@
             if (filterType === 'dateRange') {
                 const fromDate = el('masterExportFromDate').value;
                 const toDate = el('masterExportToDate').value;
-                if (!fromDate || !toDate) {
-                    showToast('Select both From Date and To Date.');
-                    return null;
-                }
+                if (!fromDate || !toDate) { showToast('Select both From Date and To Date.'); return null; }
                 const start = new Date(`${fromDate}T00:00:00`);
                 const end = new Date(`${toDate}T23:59:59`);
-                if (start > end) {
-                    showToast('From Date cannot be after To Date.');
-                    return null;
-                }
+                if (start > end) { showToast('From Date cannot be after To Date.'); return null; }
                 transfers = transfers.filter((transfer) => isTransferInDateWindow(transfer, start, end));
             }
 
             if (filterType === 'month') {
                 const month = el('masterExportMonth').value;
-                if (!month) {
-                    showToast('Select month for month-wise export.');
-                    return null;
-                }
+                if (!month) { showToast('Select month for month-wise export.'); return null; }
                 const start = new Date(`${month}-01T00:00:00`);
                 const end = new Date(start);
                 end.setMonth(end.getMonth() + 1);
@@ -1372,7 +1371,8 @@
         }
 
         function showHistory(transfer) {
-            const lines = (transfer.history || []).map((entry) => `${formatDateTime(entry.at)} - ${entry.action}: ${entry.text}`).join('\n');
+            const lines = (transfer.history || []).map((entry) => `${formatDateTime(entry.at)} - ${entry.action}: ${entry.text}`).join('
+');
             alert(lines || 'No history available.');
         }
 
