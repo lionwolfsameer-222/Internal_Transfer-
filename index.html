@@ -7,7 +7,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- Firebase Compat SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
     <style>
@@ -100,6 +99,7 @@
             <button id="loginBtn" class="mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-900 py-4 text-base font-bold text-white active:opacity-80" type="button">
                 Secure Authenticate <i class="fa-solid fa-right-to-bracket"></i>
             </button>
+
         </section>
 
         <section id="screenManager" class="screen flex-col flex-1">
@@ -319,7 +319,6 @@
         // ────────────────────────────────────────────────────────────────────
 
         const STORAGE_KEY = 'healthyChefTransferAppV2';
-        const LOCAL_DATA_KEY = 'healthyChef_localCache'; // Performance cache
         const STATUS_LABELS = {
             sent: 'PENDING',
             acknowledged: 'ACKNOWLEDGED',
@@ -346,10 +345,10 @@
         const cloneData = (value) => JSON.parse(JSON.stringify(value));
         const cleanText = (value) => String(value ?? '').replace(/[<>]/g, '').trim();
 
-        // ── Firebase helpers ─────────────────────────────────────────────────
         function transfersToFirebase(arr) {
             const obj = {};
             arr.forEach((t) => {
+                if (!t || !t.id) return;
                 const key = String(t.id).replace(/[.#$[\]]/g, '_');
                 obj[key] = { ...t, items: t.items || [], history: t.history || [] };
             });
@@ -369,14 +368,6 @@
                 .sort((a, b) => new Date(b.sentAt || 0) - new Date(a.sentAt || 0));
         }
 
-        // Fast Load: Check local cache first
-        function getLocalCache() {
-            try {
-                const cached = localStorage.getItem(LOCAL_DATA_KEY);
-                return cached ? JSON.parse(cached) : null;
-            } catch(e) { return null; }
-        }
-
         async function loadDataFromFirebase() {
             try {
                 const snapshot = await APP_REF.once('value');
@@ -387,31 +378,27 @@
                 const settings = { ...cloneData(defaultData.settings), ...saved.settings };
                 settings.branches = ensureArray(saved.settings.branches);
                 settings.removedBranches = saved.settings.removedBranches || {};
-                
-                const finalData = { settings, transfers: transfersFromFirebase(saved.transfers) };
-                localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(finalData));
-                return finalData;
+                return { settings, transfers: transfersFromFirebase(saved.transfers) };
             } catch (err) {
                 console.error('Firebase load error:', err);
-                return getLocalCache() || cloneData(defaultData);
+                return cloneData(defaultData);
             }
         }
 
         function saveData() {
             _isSaving = true;
-            localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(data)); // Immediate local backup save
             APP_REF.set({
                 settings: data.settings,
                 transfers: transfersToFirebase(data.transfers)
             })
             .then(() => { setTimeout(() => { _isSaving = false; }, 800); })
-            .catch((err) => { console.error('Firebase save error:', err); _isSaving = false; showToast('Save error – saved locally.'); });
+            .catch((err) => { console.error('Firebase save error:', err); _isSaving = false; showToast('Save error – check connection.'); });
             sessionStorage.setItem(STORAGE_KEY + '_session', JSON.stringify(session));
         }
 
         function setupRealtimeListener() {
             APP_REF.on('value', (snapshot) => {
-                if (_isSaving) return; 
+                if (_isSaving) return;          
                 const saved = snapshot.val();
                 if (!saved || !saved.settings) return;
                 const settings = { ...cloneData(defaultData.settings), ...saved.settings };
@@ -419,17 +406,15 @@
                 settings.removedBranches = saved.settings.removedBranches || {};
                 data.settings = settings;
                 data.transfers = transfersFromFirebase(saved.transfers);
-                localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(data));
                 renderAll();
             });
         }
-        // ─────────────────────────────────────────────────────────────────────
 
-        let data = getLocalCache() || cloneData(defaultData); // INSTANT INITIALIZATION FROM CACHE 🚀
-        let session = loadSession();
+        let data = cloneData(defaultData);  
+        let session = { role: null, branchId: null };
         let activeManagerTab = 'send';
         let toastTimer = null;
-        let _isSaving = false; 
+        let _isSaving = false;              
 
         const branchById = (id) => data.settings.branches.find((branch) => branch.id === id);
         const branchName = (id) => branchById(id)?.name || data.settings.removedBranches?.[id] || 'Removed Branch';
@@ -438,32 +423,29 @@
             return raw.replace(/^Healthy Chef\s*-\s*/i, '').trim() || raw.trim();
         };
 
-        // DOM Loaded event streamlined for speed ⚡
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            data = await loadDataFromFirebase();
+            session = loadSession();
+
             bindEvents();
             normalizeAndCleanupData(false);
             
-            if (session.role === 'manager') {
+            if (session && session.role === 'manager') {
                 showScreen('screenManager');
                 activeManagerTab = 'dashboard';
                 switchManagerTab('dashboard');
-            } else if (session.role === 'master') {
+            } else if (session && session.role === 'master') {
                 showScreen('screenMaster');
+            } else {
+                showScreen('screenAuth');
             }
             
-            // Render cached data immediately so user feels 0ms delay
             renderAll();
             el('loadingOverlay').classList.add('hidden');
-
-            // Fetch absolute fresh data from Firebase in the background
-            loadDataFromFirebase().then((freshData) => {
-                data = freshData;
-                renderAll();
-                setupRealtimeListener();
-            });
+            setupRealtimeListener();
 
             setInterval(() => {
-                if (session.role === 'manager' && activeManagerTab === 'dashboard') renderDashboard();
+                if (session && session.role === 'manager' && activeManagerTab === 'dashboard') renderDashboard();
             }, 60000);
         });
 
@@ -479,10 +461,7 @@
             el('saveBranchPasswordBtn').addEventListener('click', changeBranchPassword);
             el('sendForm').addEventListener('submit', submitTransfer);
             el('addItemRowBtn').addEventListener('click', addExtraItemRow);
-            el('sendReturnRequired').addEventListener('change', () => {
-                el('sendReturnRequired').checked = true;
-                el('returnDaysWrap').classList.remove('hidden');
-            });
+            
             document.querySelectorAll('.manager-tab').forEach((button) => {
                 button.addEventListener('click', () => switchManagerTab(button.dataset.tab));
             });
@@ -496,7 +475,7 @@
             });
             el('logoInputHeader').addEventListener('change', handleLogoUpload);
             el('headerLogoBox').addEventListener('click', (e) => {
-                if (session.role !== 'master') { e.preventDefault(); e.stopPropagation(); return; }
+                if (!session || session.role !== 'master') { e.preventDefault(); e.stopPropagation(); return; }
                 el('logoInputHeader').click();
             });
             el('saveAppSettingsBtn').addEventListener('click', saveAppSettings);
@@ -542,38 +521,38 @@
             renderLogo();
             renderHeader();
             renderLoginBranches();
-            if (session.role === 'manager') {
+            if (session && session.role === 'manager') {
                 renderManagerShell();
                 renderDashboard();
                 renderReports();
             }
-            if (session.role === 'master') renderMaster();
+            if (session && session.role === 'master') renderMaster();
         }
 
         function renderHeader() {
             const appName = data.settings.appName || 'Healthy Chef';
-            if (session.role === 'manager') {
+            if (session && session.role === 'manager') {
                 el('appHeaderTitle').textContent = `${appName} - ${shortBranchName(session.branchId)} Welcome`;
-            } else if (session.role === 'master') {
+            } else if (session && session.role === 'master') {
                 el('appHeaderTitle').textContent = `${appName} - Master Welcome`;
             } else {
                 el('appHeaderTitle').textContent = appName;
             }
             el('appHeaderSubtitle').textContent = data.settings.subtitle || 'Inter-Restaurant Material Transfer';
-            el('logoutBtn').classList.toggle('hidden', !session.role);
+            el('logoutBtn').classList.toggle('hidden', !session || !session.role);
         }
 
         function renderLogo() {
             const logo = data.settings.logo;
             ['headerLogoImg', 'loginLogoImg'].forEach((id) => {
                 const img = el(id);
+                if (!img) return;
                 img.style.display = logo ? 'block' : 'none';
                 if (logo) {
                     img.onerror = () => {
                         data.settings.logo = '';
                         saveData();
                         renderLogo();
-                        showToast('Logo file could not load. Please upload again.');
                     };
                     img.src = logo;
                 } else {
@@ -583,6 +562,7 @@
             });
             ['headerLogoPlaceholder', 'loginLogoPlaceholder'].forEach((id) => {
                 const placeholder = el(id);
+                if (!placeholder) return;
                 placeholder.classList.toggle('is-hidden', !!logo);
                 placeholder.style.display = logo ? 'none' : 'inline-block';
             });
@@ -590,6 +570,7 @@
 
         function renderLoginBranches() {
             const select = el('inputAuthBranch');
+            if (!select) return;
             select.innerHTML = '';
             data.settings.branches.forEach((branch) => {
                 const option = document.createElement('option');
@@ -653,7 +634,8 @@
 
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach((screen) => screen.classList.remove('active'));
-            el(id).classList.add('active');
+            const target = el(id);
+            if(target) target.classList.add('active');
         }
 
         function switchManagerTab(tab) {
@@ -666,7 +648,9 @@
                 button.classList.toggle('text-slate-600', !isActive);
             });
             document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.remove('active'));
-            el(`tab${tab[0].toUpperCase()}${tab.slice(1)}`).classList.add('active');
+            const currentTab = el(`tab${tab[0].toUpperCase()}${tab.slice(1)}`);
+            if(currentTab) currentTab.classList.add('active');
+            
             if (tab === 'dashboard') renderDashboard();
             if (tab === 'reports') renderReports();
             if (tab === 'send') renderSendForm();
@@ -674,6 +658,7 @@
         }
 
         function renderManagerShell() {
+            if (!session || !session.branchId) return;
             renderSendForm();
             renderSettings();
             const banner = el('managerBanner');
@@ -682,7 +667,7 @@
         }
 
         function renderSendForm() {
-            if (!session.branchId) return;
+            if (!session || !session.branchId) return;
             el('sendFromBranch').textContent = branchName(session.branchId);
             const select = el('sendToBranch');
             select.innerHTML = '';
@@ -738,6 +723,7 @@
 
         function submitTransfer(event) {
             event.preventDefault();
+            if (!session || !session.branchId) return;
             const items = collectTransferItems();
             const toBranchId = el('sendToBranch').value;
             if (!toBranchId || items.some((item) => !item.itemName || !item.quantity || item.quantity < 1)) {
@@ -781,6 +767,7 @@
         }
 
         function renderDashboard() {
+            if (!session || !session.branchId) return;
             const queue = getActionQueueForBranch(session.branchId);
             renderDashboardAlerts(queue);
             const container = el('actionQueue');
@@ -794,7 +781,7 @@
 
         function getActionQueueForBranch(branchId) {
             return data.transfers.filter((transfer) => {
-                if (transfer.status === 'closed') return false;
+                if (!transfer || transfer.status === 'closed') return false;
                 return transfer.fromBranchId === branchId || transfer.toBranchId === branchId;
             });
         }
@@ -864,6 +851,7 @@
         }
 
         function appendDashboardActions(row, transfer) {
+            if(!session) return;
             if (transfer.status === 'sent' && transfer.toBranchId === session.branchId) {
                 row.appendChild(actionButton('Acknowledge', 'fa-check', 'bg-blue-100 text-blue-900', () => acknowledgeTransfer(transfer.id)));
             }
@@ -893,7 +881,7 @@
         function appendReportActions(row, transfer) {
             const historyBtn = actionButton('History', 'fa-clock-rotate-left', 'bg-slate-100 text-slate-700', () => showHistory(transfer));
             row.appendChild(historyBtn);
-            if (session.role === 'master') {
+            if (session && session.role === 'master') {
                 const deleteBtn = actionButton('Delete', 'fa-trash', 'bg-red-50 text-red-700 border border-red-200', () => deleteSingleTransfer(transfer.id));
                 row.appendChild(deleteBtn);
             }
@@ -909,6 +897,7 @@
         }
 
         function acknowledgeTransfer(id) {
+            if(!session) return;
             const transfer = data.transfers.find((item) => item.id === id);
             if (!transfer || transfer.status !== 'sent' || transfer.toBranchId !== session.branchId) return;
             transfer.status = 'acknowledged';
@@ -920,6 +909,7 @@
         }
 
         function markReturned(id) {
+            if(!session) return;
             const transfer = data.transfers.find((item) => item.id === id);
             if (!transfer || transfer.status !== 'acknowledged' || transfer.toBranchId !== session.branchId) return;
             transfer.status = 'returned';
@@ -931,6 +921,7 @@
         }
 
         function markReceivedDone(id) {
+            if(!session) return;
             const transfer = data.transfers.find((item) => item.id === id);
             if (!transfer || transfer.status !== 'returned' || transfer.fromBranchId !== session.branchId) return;
             transfer.status = 'closed';
@@ -944,6 +935,7 @@
         }
 
         function renderReports() {
+            if(!session) return;
             const list = el('reportsList');
             list.innerHTML = '';
             const transfers = data.transfers.filter((transfer) => {
@@ -958,10 +950,12 @@
         }
 
         function renderSettings() {
+            if(!session) return;
             el('settingsLoginName').textContent = `${shortBranchName(session.branchId)} Welcome - ${branchName(session.branchId)}`;
         }
 
         function changeBranchPassword() {
+            if(!session) return;
             const branch = branchById(session.branchId);
             if (!branch) {
                 showToast('Branch login not found. Please login again.');
@@ -989,8 +983,8 @@
         }
 
         function renderMaster() {
-            el('masterAppName').value = data.settings.appName;
-            el('masterSubtitle').value = data.settings.subtitle;
+            el('masterAppName').value = data.settings.appName || 'Healthy Chef';
+            el('masterSubtitle').value = data.settings.subtitle || 'Inter-Restaurant Material Transfer';
             renderMasterBranches();
             renderMasterExportBranchOptions();
             toggleMasterExportInputs();
@@ -998,8 +992,9 @@
         }
 
         function renderMasterExportBranchOptions() {
-            const selected = el('masterExportBranch').value || 'ALL';
             const select = el('masterExportBranch');
+            if(!select) return;
+            const selected = select.value || 'ALL';
             select.innerHTML = '<option value="ALL">All Branches</option>';
             data.settings.branches.forEach((branch) => {
                 const option = document.createElement('option');
@@ -1119,7 +1114,7 @@
                 showToast('At least one branch is required.');
                 return;
             }
-            const hasTransfers = data.transfers.some((transfer) => transfer.fromBranchId === branchId || transfer.toBranchId === branchId);
+            const hasTransfers = data.transfers.some((transfer) => transfer && (transfer.fromBranchId === branchId || transfer.toBranchId === branchId));
             const message = hasTransfers
                 ? `${branch.name} has transfer history. Remove login only and keep history in reports?`
                 : `Remove ${branch.name}?`;
@@ -1136,7 +1131,7 @@
             const branch = branchById(branchId) || { name: branchName(branchId) };
             if (!confirm(`Delete all transfer records linked with ${branch.name}? This cannot be undone.`)) return;
             const before = data.transfers.length;
-            data.transfers = data.transfers.filter((transfer) => transfer.fromBranchId !== branchId && transfer.toBranchId !== branchId);
+            data.transfers = data.transfers.filter((transfer) => transfer && transfer.fromBranchId !== branchId && transfer.toBranchId !== branchId);
             saveData();
             renderAll();
             showToast(`${before - data.transfers.length} transfer(s) deleted for this branch.`);
@@ -1181,6 +1176,7 @@
         }
 
         function normalizeAndCleanupData(showMessage) {
+            if(!data.transfers) data.transfers = [];
             const seen = new Set();
             data.transfers = data.transfers
                 .filter((transfer) => transfer && (transfer.id || transfer.itemName))
@@ -1211,8 +1207,8 @@
                         quantity: items[0].quantity,
                         unit: items[0].unit,
                         items,
-                        fromBranchId: transfer.fromBranchId || transfer.from || data.settings.branches[0]?.id,
-                        toBranchId: transfer.toBranchId || transfer.to || data.settings.branches[1]?.id || data.settings.branches[0]?.id,
+                        fromBranchId: transfer.fromBranchId || transfer.from || (data.settings.branches[0] ? data.settings.branches[0].id : ''),
+                        toBranchId: transfer.toBranchId || transfer.to || (data.settings.branches[1] ? data.settings.branches[1].id : (data.settings.branches[0] ? data.settings.branches[0].id : '')),
                         status: ['sent', 'acknowledged', 'returned', 'closed'].includes(status) ? status : 'sent',
                         returnRequired: normalizedReturnRequired,
                         returnAfterDays,
@@ -1238,7 +1234,7 @@
         function deleteClosedTransfers() {
             if (!confirm('Delete all closed transfer records? Pending dashboard items will remain.')) return;
             const before = data.transfers.length;
-            data.transfers = data.transfers.filter((transfer) => transfer.status !== 'closed');
+            data.transfers = data.transfers.filter((transfer) => transfer && transfer.status !== 'closed');
             saveData();
             renderAll();
             showToast(`${before - data.transfers.length} closed transfer(s) deleted.`);
@@ -1291,8 +1287,7 @@
                 XLSX.utils.book_append_sheet(workbook, worksheet, 'Transfers');
                 XLSX.writeFile(workbook, `healthy-chef-transfers-${new Date().toISOString().slice(0, 10)}.xlsx`);
             } else {
-                const csv = [Object.keys(rows[0]).join(','), ...rows.map((row) => Object.values(row).map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))].join('
-');
+                const csv = [Object.keys(rows[0]).join(','), ...rows.map((row) => Object.values(row).map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))].join('\n');
                 const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(blob);
@@ -1303,7 +1298,8 @@
         }
 
         function getTransfersForExcel(scope) {
-            let transfers = data.transfers.filter((transfer) => scope === 'master' || transfer.fromBranchId === session.branchId || transfer.toBranchId === session.branchId);
+            if(!session) return [];
+            let transfers = data.transfers.filter((transfer) => transfer && (scope === 'master' || transfer.fromBranchId === session.branchId || transfer.toBranchId === session.branchId));
             if (scope !== 'master' && scope !== 'branchFiltered') return transfers;
 
             if (scope === 'branchFiltered') {
@@ -1330,23 +1326,32 @@
 
             const branchFilter = el('masterExportBranch').value;
             if (branchFilter && branchFilter !== 'ALL') {
-                transfers = transfers.filter((transfer) => transfer.fromBranchId === branchFilter || transfer.toBranchId === branchFilter);
+                transfers = transfers.filter((transfer) => transfer && (transfer.fromBranchId === branchFilter || transfer.toBranchId === branchFilter));
             }
 
             const filterType = el('masterExportFilterType').value;
             if (filterType === 'dateRange') {
                 const fromDate = el('masterExportFromDate').value;
                 const toDate = el('masterExportToDate').value;
-                if (!fromDate || !toDate) { showToast('Select both From Date and To Date.'); return null; }
+                if (!fromDate || !toDate) {
+                    showToast('Select both From Date and To Date.');
+                    return null;
+                }
                 const start = new Date(`${fromDate}T00:00:00`);
                 const end = new Date(`${toDate}T23:59:59`);
-                if (start > end) { showToast('From Date cannot be after To Date.'); return null; }
+                if (start > end) {
+                    showToast('From Date cannot be after To Date.');
+                    return null;
+                }
                 transfers = transfers.filter((transfer) => isTransferInDateWindow(transfer, start, end));
             }
 
             if (filterType === 'month') {
                 const month = el('masterExportMonth').value;
-                if (!month) { showToast('Select month for month-wise export.'); return null; }
+                if (!month) {
+                    showToast('Select month for month-wise export.');
+                    return null;
+                }
                 const start = new Date(`${month}-01T00:00:00`);
                 const end = new Date(start);
                 end.setMonth(end.getMonth() + 1);
@@ -1371,22 +1376,23 @@
         }
 
         function showHistory(transfer) {
-            const lines = (transfer.history || []).map((entry) => `${formatDateTime(entry.at)} - ${entry.action}: ${entry.text}`).join('
-');
+            const lines = (transfer.history || []).map((entry) => `${formatDateTime(entry.at)} - ${entry.action}: ${entry.text}`).join('\n');
             alert(lines || 'No history available.');
         }
 
         function makeHistory(action, text) {
             return {
                 at: new Date().toISOString(),
-                actor: session.branchId ? branchName(session.branchId) : 'System',
+                actor: session && session.branchId ? branchName(session.branchId) : 'System',
                 action,
                 text
             };
         }
 
         function nextTransferId() {
+            if(!data.transfers || !data.transfers.length) return "1001";
             const max = data.transfers.reduce((highest, transfer) => {
+                if(!transfer) return highest;
                 const number = Number(String(transfer.id || '').replace(/\D/g, ''));
                 return Number.isFinite(number) ? Math.max(highest, number) : highest;
             }, 1000);
@@ -1400,11 +1406,11 @@
         }
 
         function isOverdue(transfer) {
-            return ['sent', 'acknowledged'].includes(transfer.status) && transfer.dueDate && new Date(transfer.dueDate).getTime() < Date.now();
+            return transfer && ['sent', 'acknowledged'].includes(transfer.status) && transfer.dueDate && new Date(transfer.dueDate).getTime() < Date.now();
         }
 
         function formatDueText(transfer) {
-            if (!transfer.dueDate) return '';
+            if (!transfer || !transfer.dueDate) return '';
             const diff = new Date(transfer.dueDate).getTime() - Date.now();
             const dayMs = 24 * 60 * 60 * 1000;
             const days = Math.ceil(Math.abs(diff) / dayMs);
@@ -1427,6 +1433,7 @@
 
         function showToast(message) {
             const toast = el('toast');
+            if(!toast) return;
             toast.textContent = message;
             toast.classList.remove('hidden');
             clearTimeout(toastTimer);
