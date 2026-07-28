@@ -9,7 +9,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
     <style>
         :root {
             --primary: #1e3a8a;
@@ -316,7 +315,6 @@
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-        const auth = firebase.auth();
         const APP_REF = db.ref('healthyChefApp');
         // ────────────────────────────────────────────────────────────────────
 
@@ -426,13 +424,6 @@
         };
 
         document.addEventListener('DOMContentLoaded', async () => {
-            try {
-                await auth.signInAnonymously();
-            } catch (err) {
-                console.error('Firebase auth error:', err);
-                el('loadingOverlay').innerHTML = '<p class="text-white text-sm font-semibold">Connection error. Please refresh.</p>';
-                return;
-            }
             data = await loadDataFromFirebase();
             session = loadSession();
 
